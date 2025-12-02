@@ -68,14 +68,14 @@ def get_current_session_offset(
         return start_offset, 'NIGHT'
     
     # 3. 判斷 隔日夜盤時段 (00:00 到 05:00:05 之間)
-    if current_time < NIGHT_SESSION_END:
+    if current_time < DAY_SESSION_START:
         # 日期回溯一天，起始點為前一日的 NIGHT_SESSION_START
         previous_date = current_date - timedelta(days=1)
         start_offset = datetime.combine(previous_date, NIGHT_SESSION_START)
         return start_offset, 'NIGHT'
         
     # 4. 判斷 日盤時段 (08:30 到 13:45:05 之間)
-    if DAY_SESSION_START <= current_time < DAY_SESSION_END:
+    if DAY_SESSION_START <= current_time < NIGHT_SESSION_START:
         start_offset = datetime.combine(current_date, DAY_SESSION_START)
         return start_offset, 'DAY'
     

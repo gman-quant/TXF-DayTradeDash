@@ -2,8 +2,6 @@
 
 import numpy as np
 from typing import Tuple
-
-# 引入 Protobuf 定義以便 Type Hinting (非必要，但有助 IDE 提示)
 from data_schemas.txf_data_pb2 import Tick
 
 class TxfRingBuffer:
@@ -17,46 +15,80 @@ class TxfRingBuffer:
         self.is_full = False   # 標記是否已經寫滿過一輪
         
         # ==========================================
-        # 💾 預先分配記憶體 (Pre-allocation)
+        # 💾 基礎數據欄位
         # ==========================================
-        # 1. 時間戳 (Unix Int64)
         self.timestamp = np.zeros(capacity, dtype=np.int64)
-        
-        # 2. 價格 (Float64)
-        # 雖然 Protobuf 傳來的是 Scaled Int，但為了計算均線等指標，
-        # 我們在寫入時直接轉為 Float64，省去後續計算重複轉換的開銷。
         self.close = np.zeros(capacity, dtype=np.float64)
-        
-        # 3. 成交量 (Int32)
         self.volume = np.zeros(capacity, dtype=np.int32)
-        
-        # 4. 總量 (Int32) - 用於檢查封包是否有遺漏
         self.total_volume = np.zeros(capacity, dtype=np.int32)
-        
-        # 5. 買賣盤別 (Int32)
         self.tick_type = np.zeros(capacity, dtype=np.int32)
-
-        # 6. 標的物價格 (Float64)
         self.underlying_price = np.zeros(capacity, dtype=np.float64)
+
+        # ==========================================
+        # ⚡️ 狀態與累積欄位 (Stateful & Cumulative)
+        # 這些欄位是為了 O(1) 指標計算而存在的
+        # ==========================================
+        
+        # 1. 當盤高低點 (Stateful)
+        self.session_high = np.zeros(capacity, dtype=np.float64)
+        self.session_low  = np.zeros(capacity, dtype=np.float64)
+        
+        # 2. 累積和 (Cumulative Sums) - 用於 O(1) VWAP 和 SMA
+        self.cum_volume = np.zeros(capacity, dtype=np.int64)   # 累積成交量 (分母)
+        self.cum_pv     = np.zeros(capacity, dtype=np.float64) # 累積 PV (分子)
+        self.cum_close  = np.zeros(capacity, dtype=np.float64) # 累積收盤價 (用於 SMA)
 
     def write_tick(self, tick: Tick):
         """
-        將單筆 Tick 寫入緩衝區 (O(1) 複雜度)
+        將單筆 Tick 寫入緩衝區，並同步更新所有狀態欄位。
         """
         idx = self.head
+        prev_idx = idx - 1
+        if prev_idx < 0: prev_idx = self.capacity - 1
         
-        # 1. 填入數據 (直接操作 NumPy 記憶體)
+        # 1. 填入基礎數據
         self.timestamp[idx]    = tick.timestamp_ms
         self.volume[idx]       = tick.volume
         self.total_volume[idx] = tick.total_volume
         self.tick_type[idx]    = tick.tick_type
         
-        # 關鍵優化：在此處處理 Scaled Integer (/10000.0)
-        # 讓後續 Numba 計算直接面對乾淨的 Float
-        self.close[idx]            = tick.close / 10000.0
+        # 價格正規化 (/10000.0)
         self.underlying_price[idx] = tick.underlying_price / 10000.0
+        price = tick.close / 10000.0
+        self.close[idx] = price
 
-        # 2. 移動指標 (Wrap Around)
+        # 2. 計算當盤最高/最低 (O(1))
+        is_first_tick = (self.head == 0 and not self.is_full)
+        
+        if is_first_tick:
+            # 第一筆：初始化
+            self.session_high[idx] = price
+            self.session_low[idx]  = price
+            
+            # 初始化累積值
+            self.cum_volume[idx] = tick.volume
+            self.cum_pv[idx]     = price * tick.volume
+            self.cum_close[idx]  = price
+        else:
+            # 後續：遞迴更新
+            prev_high = self.session_high[prev_idx]
+            prev_low  = self.session_low[prev_idx]
+            
+            # 防呆：如果上一筆是 0，也把自己當起點
+            if prev_high == 0: 
+                self.session_high[idx] = price
+                self.session_low[idx] = price
+            else:
+                self.session_high[idx] = max(prev_high, price)
+                self.session_low[idx]  = min(prev_low, price)
+            
+            # 3. 計算累積和 (當前累積 = 上一筆累積 + 當前值)
+            # 即使 total_volume 存在，我們還是手動累加 cum_volume 以確保分子分母同步
+            self.cum_volume[idx] = self.cum_volume[prev_idx] + tick.volume
+            self.cum_pv[idx]     = self.cum_pv[prev_idx]     + (price * tick.volume)
+            self.cum_close[idx]  = self.cum_close[prev_idx]  + price
+
+        # 4. 移動指標 (Wrap Around)
         self.head += 1
         if self.head >= self.capacity:
             self.head = 0
@@ -65,23 +97,33 @@ class TxfRingBuffer:
     def get_snapshot(self):
         """
         回傳 Numba 計算所需的 Array 參照
-        順序邏輯：價格(最常用) -> 量/方向(策略核心) -> 時間/輔助 -> 指標(Head)
+        注意：這裡的回傳順序必須與 IndicatorManager.on_tick 的解包順序完全一致！
         """
         return (
-            self.close,             # 1. 價格 (Price)：最常被用到
-            self.volume,            # 2. 成交量 (Volume)：次常用
-            self.tick_type,         # 3. 內外盤 (Type)：計算 OFI/CVD 必備
-            self.timestamp,         # 4. 時間 (Time)：時間窗口計算用
-            self.underlying_price,  # 5. 標的 (Aux)：計算價差用
-            self.head               # 6. 指標 (Cursor)：告訴 Numba 目前寫到哪
+            self.close,             # 0
+            self.volume,            # 1
+            self.tick_type,         # 2
+            self.timestamp,         # 3
+            self.underlying_price,  # 4
+            self.cum_volume,        # 5 (新)
+            self.cum_pv,            # 6 (新)
+            self.cum_close,         # 7 (新)
+            self.session_high,      # 8
+            self.session_low,       # 9
+            self.total_volume,      # 10
+            self.head               # 11
         )
 
     def clear(self):
         """重置緩衝區 (例如開盤前)"""
         self.head = 0
         self.is_full = False
-        # 選擇性：將數據歸零 (視需求而定，追求極速可不歸零，只需重置 head)
         self.timestamp.fill(0)
         self.close.fill(0)
         self.volume.fill(0)
         self.underlying_price.fill(0)
+        self.session_high.fill(0)
+        self.session_low.fill(0)
+        self.cum_volume.fill(0)
+        self.cum_pv.fill(0)
+        self.cum_close.fill(0)

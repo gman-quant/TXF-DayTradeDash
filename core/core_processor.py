@@ -101,9 +101,6 @@ class CoreProcessor:
         
         # 預先實例化 Protobuf 物件 (重用物件以減少記憶體分配)
         current_tick = Tick()
-        
-        # 用於計算處理速度的計數器 (Debug用)
-        count = 0 
 
         try:
             # --- 極速消費迴圈 (Hot Path) ---
@@ -127,14 +124,14 @@ class CoreProcessor:
                 snapshot = self.ring_buffer.get_snapshot()
                 
                 # 執行計算並更新歷史
-                vwap, mom = self.indicator_manager.on_tick(snapshot)
+                self.indicator_manager.on_tick(snapshot)
                 
                 # ==========================================
                 # (Optional) 每 1000 筆 Log 一次證明活著
-                count += 1
+                count = self.ring_buffer.head
                 if count % 1000 == 0:
                     # 顯示最新價格與 Buffer 頭部位置
-                    logger.info(f"Tick#{count} | Price:{current_tick.close/10000.0} | VWAP(50):{vwap:.2f} | Mom(10):{mom:.2f}")
+                    logger.info(f"Tick#{count} | Price: {current_tick.close/10000.0} | TAIEX: {current_tick.underlying_price/10000.0} | TotalVol: {current_tick.total_volume}")
 
         except asyncio.CancelledError:
             logger.info("CoreProcessor task cancelled.")

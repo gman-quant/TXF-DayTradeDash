@@ -96,7 +96,7 @@ class GaleKafkaConsumer:
             while True:
                 # 這裡使用 run_in_executor 是為了讓 blocking 的 poll() 不會卡住 asyncio loop
                 # timeout 設短一點可以讓 loop 有機會響應中斷
-                msg = await loop.run_in_executor(None, self.consumer.poll, 1.0)
+                msg = await loop.run_in_executor(None, self.consumer.poll, 0.1)
 
                 if msg is None:
                     continue
