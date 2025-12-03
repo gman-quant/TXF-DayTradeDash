@@ -4,36 +4,68 @@ import pandas as pd
 import plotly.graph_objects as go
 import bisect
 from config.indicator_config import INDICATORS_SETUP, TYPE_OVERLAY, TYPE_OSCILLATOR
+from config.ui_theme import UI_COLOR
 
+# =============================================================================
+# 🛠️ 輔助函數：空白圖表
+# =============================================================================
+def create_blank_figure():
+    """
+    生成一個預設為黑色背景的空白 Plotly Figure。
+    用途：在數據尚未載入或發生錯誤時回傳，防止 Dash 前端崩潰 (White Flash)。
+    """
+    return go.Figure(
+        layout=go.Layout(
+            paper_bgcolor=UI_COLOR['BG_MAIN'], # 使用主題中的背景色
+            plot_bgcolor=UI_COLOR['BG_MAIN'],
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            margin=dict(l=0, r=0, t=0, b=0)
+        )
+    )
+
+# =============================================================================
+# 🧠 核心邏輯：數據處理 (Data Processing)
+# =============================================================================
 def process_market_data(indicator_manager, lookback_count):
     """
-    處理原始數據：切片、降頻、合併 K 線
-    回傳: (prepared_data_dict, status_metrics)
+    處理原始數據：切片 (Slicing)、降頻 (Downsampling)、K線對齊 (Alignment)。
+    
+    Returns:
+        dict: 包含繪圖所需的所有數據陣列與狀態參數。
     """
     history = indicator_manager.history
     candles = indicator_manager.candles
     current_candle = indicator_manager.current_candle
     
     raw_len = len(history['timestamp'])
-    if raw_len == 0: return None, None
+    if raw_len == 0: return None
 
-    # 1. 決定範圍
+    # --- 1. 決定顯示範圍 (Scope) ---
+    # 限制 lookback 不超過實際數據長度
     lookback = int(lookback_count) if lookback_count else 5000
+    if lookback > raw_len: lookback = raw_len
+    
     start_idx = max(0, raw_len - lookback)
-    start_ts = history['timestamp'][start_idx]
+    start_ts = history['timestamp'][start_idx] # 視窗起始時間戳
     
-    # 2. 降頻邏輯
+    # --- 2. 智慧降頻邏輯 (Downsampling) ---
+    # 目標：限制最終輸出點數在 1000 點左右，確保瀏覽器渲染流暢
+    TARGET_POINTS = 1000
     step = 1
-    if lookback > 3000: step = lookback // 3000
+    if lookback > TARGET_POINTS: 
+        step = lookback // TARGET_POINTS
     
-    # 3. 準備 Tick 數據
+    # --- 3. 準備 Tick 數據 (指標用) ---
+    # 應用 step 進行切片
     timestamps = history['timestamp'][start_idx::step]
     tick_x_axis = pd.to_datetime(timestamps, unit='ms') + pd.Timedelta(hours=8)
     
-    # 4. 準備 K 線數據 (Zero-Copy & Merge)
+    # --- 4. 準備 K 線數據 (Zero-Copy & Merge) ---
+    # 使用二分搜尋法快速定位 K 線起始點 (O(log N))
     candle_start_idx = bisect.bisect_left(candles['time'], start_ts)
     
-    # 這裡只取需要的欄位做切片，避免全量複製
+    # 切片提取 (Slicing)
     plot_candles = {
         'time': candles['time'][candle_start_idx:],
         'open': candles['open'][candle_start_idx:],
@@ -42,11 +74,19 @@ def process_market_data(indicator_manager, lookback_count):
         'close': candles['close'][candle_start_idx:]
     }
     
+    # 手動合併當前正在形成的 K 線 (Current Candle)
     if current_candle and current_candle.get('time'):
         for k in plot_candles:
             plot_candles[k].append(current_candle[k])
             
     candle_x = pd.to_datetime(plot_candles['time'], unit='ms') + pd.Timedelta(hours=8)
+
+    # --- 5. 計算預設縮放範圍 (Zoom Sync) ---
+    # 用於 "點兩下" 重置時，強制主副圖同步到此範圍
+    if len(tick_x_axis) > 0:
+        default_range = [tick_x_axis.min(), tick_x_axis.max()]
+    else:
+        default_range = None
 
     return {
         'tick_x': tick_x_axis,
@@ -55,68 +95,131 @@ def process_market_data(indicator_manager, lookback_count):
         'start_idx': start_idx,
         'step': step,
         'history': history, # 傳遞引用
-        'raw_len': raw_len
+        'raw_len': raw_len,
+        'default_range': default_range # 🆕
     }
 
+# =============================================================================
+# 📈 繪圖邏輯：主圖 (Price & Overlays)
+# =============================================================================
 def build_price_figure(data, xaxis_range, yaxis_range):
-    """繪製主圖"""
-    fig = go.Figure()
+    """繪製主圖：K線 + 疊加指標 (VWAP/SMA)"""
+    fig = create_blank_figure()
     
-    # OHLC
+    # 1. 繪製 OHLC (美式單色風格)
     fig.add_trace(go.Ohlc(
         x=data['candle_x'],
         open=data['candles']['open'], high=data['candles']['high'],
         low=data['candles']['low'], close=data['candles']['close'],
         name='5s OHLC',
-        increasing_line_color="#FFFFFF", decreasing_line_color='#FFFFFF',
+        increasing_line_color =UI_COLOR['TEXT_MAIN'], # 白線
+        decreasing_line_color =UI_COLOR['TEXT_MAIN'], # 白線
         increasing_line_width=1, decreasing_line_width=1
     ))
     
-    # Overlays
+    # 2. 動態繪製 Overlays (依據 Config)
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
+            # 應用降頻 step
             y_data = data['history'][ind['id']][data['start_idx']::data['step']]
+            
             fig.add_trace(go.Scattergl(
-                x=data['tick_x'], y=y_data, mode='lines', name=ind['id'],
+                x=data['tick_x'], y=y_data, 
+                mode='lines', name=ind['id'],
                 line=dict(color=ind['color'], width=1, dash=ind.get('style', 'solid'))
             ))
 
+    # 3. Layout 設定
     fig.update_layout(
         template='plotly_dark',
         margin=dict(l=40, r=40, t=10, b=10),
-        paper_bgcolor='#111111', plot_bgcolor='#111111',
+        uirevision='constant', # 保持使用者縮放狀態
         hovermode='x unified',
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        xaxis=dict(showgrid=True, rangeslider=dict(visible=False), range=xaxis_range if xaxis_range and xaxis_range[0] else None),
-        yaxis=dict(showgrid=True, gridcolor='#333', tickformat=',.0f', range=yaxis_range if yaxis_range and yaxis_range[0] else None)
+        
+        # 應用傳入的 Range (實現雙向同步)
+        xaxis=dict(visible=True, showgrid=True, rangeslider=dict(visible=False), range=xaxis_range),
+        yaxis=dict(visible=True, showgrid=True, gridcolor='#333', 
+                   tickformat=',.0f', side='right',
+                   range=yaxis_range if yaxis_range and yaxis_range[0] else None)
     )
     return fig
 
+# =============================================================================
+# 📊 繪圖邏輯：副圖 (Oscillators)
+# =============================================================================
 def build_momentum_figure(data, xaxis_range):
-    """繪製副圖"""
-    fig = go.Figure()
+    """繪製副圖：CVD (右軸) + Delta (左軸)"""
+    fig = create_blank_figure()
+
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']:
             y_data = data['history'][ind['id']][data['start_idx']::data['step']]
             
+            # 判斷是否使用右軸 (y2)
+            target_yaxis = ind.get('yaxis', 'y') 
+
+            # A. Delta (柱狀圖)：紅綠變色
             if ind.get('color') == 'dynamic':
-                cols = ['#FF4136' if v >= 0 else '#2ECC40' for v in y_data]
+                cols = [UI_COLOR['DOWN'] if v < 0 else UI_COLOR['UP'] for v in y_data]
                 fig.add_trace(go.Bar(
-                    x=data['tick_x'], y=y_data, marker_color=cols, name=ind['id'], marker_line_width=0
+                    x=data['tick_x'], y=y_data, 
+                    marker_color=cols, 
+                    name=ind['id'], 
+                    marker_line_width=0,
+                    opacity=0.8, 
+                    yaxis=target_yaxis
                 ))
+            
+            # B. CVD (累積線)：面積圖風格
+            elif ind['id'] == 'Session_CVD': 
+                # 使用 go.Scatter (SVG) 以確保 fill 效果正確 (WebGL fill 有時會破圖)
+                fig.add_trace(go.Scatter(
+                    x=data['tick_x'], y=y_data, 
+                    mode='lines', 
+                    name=ind['id'],
+                    line=dict(color=UI_COLOR['HIGHLIGHT'], width=1.5), # 金色
+                    fill='tozeroy',                        # 填滿至 0 軸
+                    fillcolor='rgba(255, 215, 0, 0.1)',    # 淡金背景
+                    yaxis=target_yaxis
+                ))
+                
+            # C. 其他普通線圖
             else:
                 fig.add_trace(go.Scattergl(
-                    x=data['tick_x'], y=y_data, mode='lines', name=ind['id'],
-                    line=dict(color=ind['color'], width=1.5)
+                    x=data['tick_x'], y=y_data, 
+                    mode='lines', name=ind['id'],
+                    line=dict(color=ind['color'], width=1.5),
+                    yaxis=target_yaxis
                 ))
 
+    # Layout 設定 (雙軸)
     fig.update_layout(
         template='plotly_dark',
-        margin=dict(l=40, r=40, t=10, b=40),
-        xaxis=dict(showgrid=True, range=xaxis_range if xaxis_range and xaxis_range[0] else None),
-        yaxis=dict(showgrid=True, gridcolor='#333'),
-        paper_bgcolor="#111111", plot_bgcolor="#111111",
+        margin=dict(l=40, r=40, t=10, b=10),
+        uirevision='constant',
+        
+        # 強制應用主圖的 X 軸範圍 (同步)
+        xaxis=dict(visible=True, showgrid=True, range=xaxis_range),
+        
+        # 左側 Y 軸 (Delta)
+        yaxis=dict(
+            visible=True, showgrid=True, gridcolor='#333',
+            title=dict(text='Delta', font=dict(color=UI_COLOR['TEXT_MAIN'], size=10)),
+            side='left'
+        ),
+        
+        # 右側 Y 軸 (CVD)
+        yaxis2=dict(
+            visible=True, showgrid=False, 
+            title=dict(text='CVD', font=dict(color=UI_COLOR['TEXT_MAIN'], size=10)),
+            overlaying='y', # 疊加
+            side='right', 
+            tickformat=',.0f'
+        ),
+        
         hovermode='x unified', 
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        showlegend=True # 強制顯示圖例 (即使只有一條線)
     )
     return fig

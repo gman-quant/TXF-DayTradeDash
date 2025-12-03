@@ -6,7 +6,7 @@ import sys
 import threading
 from datetime import datetime
 
-# 嘗試引入 uvloop (Linux/Mac)
+# 嘗試引入 uvloop 加速 asyncio (Linux/Mac 環境強烈建議)
 try:
     import uvloop
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
@@ -17,16 +17,23 @@ except ImportError:
 from config.txf_calendar import get_current_session_offset
 from ingestion.kafka_consumer import GaleKafkaConsumer
 from data_schemas.txf_data_pb2 import Tick
-from core.ring_buffer import TxfRingBuffer  # <--- 新增引用
+from core.ring_buffer import TxfRingBuffer
 from core.indicator_manager import IndicatorManager
 from analysis.dashboard_server import start_dashboard_server
 
-# 設定 Logging
+# =========================================================
+# ⚙️ Logging 設定
+# =========================================================
+# 靜音 Werkzeug (Dash 伺服器) 的 HTTP 請求日誌
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s'
+    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+    stream=sys.stdout
 )
 logger = logging.getLogger("CoreProcessor")
+
 
 class CoreProcessor:
     def __init__(self, kafka_broker: str, group_id: str, tick_topic: str):
@@ -39,7 +46,11 @@ class CoreProcessor:
         
         # 2. 初始化 Ring Buffer (容量 200,000)
         self.ring_buffer = TxfRingBuffer(capacity=200000)
+        
+        # ⚡️ 安全性優化：強制清空記憶體，避免殘留數據導致指標計算錯誤
+        self.ring_buffer.clear()
 
+        # 3. 初始化 Indicator Manager
         self.indicator_manager = IndicatorManager(buffer_capacity=200000)
         
         # 狀態標記
@@ -95,12 +106,20 @@ class CoreProcessor:
             daemon=True  # Daemon 表示主程式結束時，它也會跟著結束
         )
         dash_thread.start()
-        # ==========================================
         
         logger.info("🚀 TXF Gale Engine Core Started - Processing Stream...")
         
         # 預先實例化 Protobuf 物件 (重用物件以減少記憶體分配)
         current_tick = Tick()
+        
+        # ⚡️ 效能優化：方法預綁定 (Method Pre-binding)
+        # 在高頻迴圈中，減少 self.xxx.yyy 的屬性查找開銷
+        write_tick = self.ring_buffer.write_tick
+        get_snapshot = self.ring_buffer.get_snapshot
+        calc_indicators = self.indicator_manager.on_tick
+        
+        # 總處理筆數計數器
+        processed_count = 0
 
         try:
             # --- 極速消費迴圈 (Hot Path) ---
@@ -116,22 +135,22 @@ class CoreProcessor:
                     continue
 
                 # 2. 寫入 Ring Buffer (O(1) Operation)
-                #    這是數據進入計算核心的關鍵一步
-                self.ring_buffer.write_tick(current_tick)
+                write_tick(current_tick)
 
-                # 🚀 3. 觸發計算 (Trigger Calculation)
-                # 獲取 Buffer 快照
-                snapshot = self.ring_buffer.get_snapshot()
-                
-                # 執行計算並更新歷史
-                self.indicator_manager.on_tick(snapshot)
+                # 3. 觸發計算 (Trigger Calculation)
+                # 獲取 Buffer 快照並傳遞給 Manager
+                calc_indicators(get_snapshot())
                 
                 # ==========================================
-                # (Optional) 每 1000 筆 Log 一次證明活著
-                count = self.ring_buffer.head
-                if count % 1000 == 0:
-                    # 顯示最新價格與 Buffer 頭部位置
-                    logger.info(f"Tick#{count} | Price: {current_tick.close/10000.0} | TAIEX: {current_tick.underlying_price/10000.0} | TotalVol: {current_tick.total_volume}")
+                # (Optional) Log 心跳包
+                # ==========================================
+                processed_count += 1
+                if processed_count % 5000 == 0: # 建議每 5000 筆印一次，減少 I/O 影響
+                    logger.info(
+                        f"Tick#{processed_count} | "
+                        f"Price: {current_tick.close/10000.0:.0f} | "
+                        f"TotalVol: {current_tick.total_volume}"
+                    )
 
         except asyncio.CancelledError:
             logger.info("CoreProcessor task cancelled.")
@@ -147,7 +166,7 @@ if __name__ == "__main__":
     # 測試參數 (請替換為真實環境)
     BROKER = "192.168.1.50:9092"
     GROUP = "gale_dev_test"
-    TOPIC = "txf-tick" # 確保 Kafka 有這個 Topic
+    TOPIC = "txf-tick" 
 
     processor = CoreProcessor(BROKER, GROUP, TOPIC)
     

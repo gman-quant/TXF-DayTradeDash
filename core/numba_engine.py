@@ -347,3 +347,41 @@ def calc_rolling_min_time(data_array: np.ndarray,
         return np.nan
         
     return min_val
+
+@jit(nopython=True, cache=True)
+def calc_session_cvd(cum_buy: np.ndarray, 
+                     cum_sell: np.ndarray, 
+                     head: int, 
+                     period: int, # 沒用到
+                     capacity: int) -> float:
+    """
+    計算當盤 CVD (Cumulative Volume Delta)
+    公式: 當前累積買量 - 當前累積賣量
+    """
+    curr_idx = head - 1
+    if curr_idx < 0: curr_idx += capacity
+    
+    # 直接相減，O(1)
+    return float(cum_buy[curr_idx] - cum_sell[curr_idx])
+
+@jit(nopython=True, cache=True)
+def calc_period_delta(cum_buy: np.ndarray, 
+                      cum_sell: np.ndarray, 
+                      head: int, 
+                      period: int, 
+                      capacity: int) -> float:
+    """
+    計算區間 Delta (例如過去 60 筆的淨買量)
+    公式: (買量變化) - (賣量變化)
+    """
+    curr_idx = head - 1
+    if curr_idx < 0: curr_idx += capacity
+    
+    prev_idx = head - 1 - period
+    if prev_idx < 0: prev_idx += capacity
+    
+    # 計算區間內的買量與賣量
+    period_buy  = cum_buy[curr_idx]  - cum_buy[prev_idx]
+    period_sell = cum_sell[curr_idx] - cum_sell[prev_idx]
+    
+    return float(period_buy - period_sell)

@@ -15,9 +15,20 @@ INDICATORS_SETUP = [
         'args': [0],                   # 參數給 0 即可 (不需要 period)
         'type': TYPE_OVERLAY,          # 畫在主圖
         'inputs': ['underlying_price'], # ⚠️ 需要這兩個累積陣列
-        'color': "#008692",            # 棕色
+        'color': "#7F4A98",            # 棕色
         'style': 'solid'               # 實線 (區別於 50MA 的虛線)
     },
+    # 當盤最高價
+    {
+        'id': 'Session_High',
+        'func': 'get_current_value',
+        'args': [0],                 
+        'type': TYPE_OVERLAY,
+        'inputs': ['session_high'],   
+        'color': "#004E00",         
+        'style': 'solid'              
+    },
+    # 當盤 VWAP
     {
         'id': 'Session_VWAP',
         'func': 'calc_session_vwap',   
@@ -27,17 +38,6 @@ INDICATORS_SETUP = [
         'color': "#008692",           
         'style': 'solid'               
     },
-    # 當盤最高價
-    {
-        'id': 'Session_High',
-        'func': 'get_current_value',   # 直接讀取
-        'args': [0],                   # 參數給 0 即可 (沒用到)
-        'type': TYPE_OVERLAY,
-        'inputs': ['session_high'],    # 指定輸入源
-        'color': "#004E00",            # 綠色
-        'style': 'solid'                 # 點線
-    },
-
     # 當盤最低價
     {
         'id': 'Session_Low',
@@ -45,10 +45,10 @@ INDICATORS_SETUP = [
         'args': [0],
         'type': TYPE_OVERLAY,
         'inputs': ['session_low'],
-        'color': "#780000",            # 紅色
+        'color': "#780000",         
         'style': 'solid'
     },
-
+    # 總成交量 (Hidden 指標，只為了 Dashboard 顯示數值用)
     {
         'id': 'Total_Vol',
         'func': 'get_current_value',
@@ -58,7 +58,26 @@ INDICATORS_SETUP = [
         'color': '#FFFFFF',
         'style': 'solid'
     },
-
+    # --- 技術指標 ---
+    {
+        'id': 'Max_180',
+        'func': 'calc_rolling_max',
+        'args': [180],                  # 過去 60 筆
+        'type': TYPE_OVERLAY,          # 疊加在主圖
+        'inputs': ['close'],           # 只需要收盤價
+        'color': '#00FF00',            # 綠色 (壓力線)
+        'style': 'dot'
+    },
+    {
+        'id': 'Min_180',
+        'func': 'calc_rolling_min',
+        'args': [180],                  # 過去 60 筆
+        'type': TYPE_OVERLAY,
+        'inputs': ['close'],
+        'color': '#FF0000',            # 紅色 (支撐線)
+        'style': 'dot'
+    },
+    # --- 移動平均線 (SMA) ---
     {
         'id': 'SMA_180',        
         'func': 'calc_sma',           
@@ -77,27 +96,7 @@ INDICATORS_SETUP = [
         'color': "#E0930F",
         'style': 'solid'
     },
-    # 1. 過去 60 筆的最高價 (High Band)
-    {
-        'id': 'Max_180',
-        'func': 'calc_rolling_max',
-        'args': [180],                  # 過去 60 筆
-        'type': TYPE_OVERLAY,          # 疊加在主圖
-        'inputs': ['close'],           # 只需要收盤價
-        'color': '#00FF00',            # 綠色 (壓力線)
-        'style': 'dot'
-    },
-
-    # 2. 過去 60 筆的最低價 (Low Band)
-    {
-        'id': 'Min_180',
-        'func': 'calc_rolling_min',
-        'args': [180],                  # 過去 60 筆
-        'type': TYPE_OVERLAY,
-        'inputs': ['close'],
-        'color': '#FF0000',            # 紅色 (支撐線)
-        'style': 'dot'
-    },
+    
     # {
     #     'id': 'Max_5m',
     #     'func': 'calc_rolling_max_time',
@@ -118,13 +117,38 @@ INDICATORS_SETUP = [
     # },
 
     # --- 副圖指標 (Sub Chart) ---
+    # {
+    #     'id': 'Mom_180ticks',
+    #     'func': 'calc_price_change',
+    #     'args': [180],
+    #     'type': TYPE_OSCILLATOR,
+    #     'inputs': ['close'],
+    #     'color': 'dynamic', # 特殊標記：代表紅綠變色
+    #     'style': 'bar'
+    # },
+
+    # 1. 當盤 CVD (數值大 -> 用右軸 y2)
     {
-        'id': 'Mom_180ticks',
-        'func': 'calc_price_change',
+        'id': 'Session_CVD',
+        'func': 'calc_session_cvd',
+        'args': [0],
+        'type': TYPE_OSCILLATOR,
+        'inputs': ['cum_buy_vol', 'cum_sell_vol'],
+        'color': '#00F0FF', # 青色實線
+        'style': 'solid',
+        'yaxis': 'y2'       # 🆕 新增：指定使用右側 Y 軸
+    },
+    
+    # 2. 短線 Delta (數值小 -> 用預設左軸)
+    {
+        'id': 'Delta_180',
+        'func': 'calc_period_delta',
         'args': [180],
         'type': TYPE_OSCILLATOR,
-        'inputs': ['close'],
-        'color': 'dynamic', # 特殊標記：代表紅綠變色
+        'inputs': ['cum_buy_vol', 'cum_sell_vol'],
+        'color': 'dynamic',
         'style': 'bar'
+        # 沒寫 yaxis 預設就是 y1 (左軸)
     }
+
 ]
