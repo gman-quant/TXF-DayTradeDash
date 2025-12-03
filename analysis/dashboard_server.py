@@ -56,11 +56,12 @@ def start_dashboard_server(indicator_manager, port=8050):
          Output('last-update-timestamp', 'data')],
         [Input('interval-component', 'n_intervals'),
          Input('lookback-slider', 'value'),
+         Input('timeframe-dropdown', 'value'),
          Input('price-xaxis-range', 'data'),
          Input('price-yaxis-range', 'data')],
         [State('last-update-timestamp', 'data')]
     )
-    def update_dashboard(n, lookback_count, xaxis_range, yaxis_range, last_ts_stored):
+    def update_dashboard(n, lookback_count, timeframe, xaxis_range, yaxis_range, last_ts_stored):
         try:
             ctx = callback_context
             trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'interval-component'
@@ -85,7 +86,7 @@ def start_dashboard_server(indicator_manager, port=8050):
             # =========================================================
             # 2. 處理數據 (只有在需要更新時才執行)
             # =========================================================
-            data_pack = process_market_data(indicator_manager, lookback_count)
+            data_pack = process_market_data(indicator_manager, lookback_count, timeframe)
             
             # 雙重防呆 (理論上上面已經擋過了，但為了型別安全保留)
             if not data_pack:
@@ -131,7 +132,7 @@ def start_dashboard_server(indicator_manager, port=8050):
         except Exception as e:
             import traceback
             # 這裡建議保留 print，方便除錯
-            # print(f"❌ Dash Error: {traceback.format_exc()}")
+            print(f"❌ Dash Error: {traceback.format_exc()}")
             return NO_DATA_FIGURE, NO_DATA_FIGURE, f"Error: {str(e)}", dash.no_update
 
     app.run(debug=False, port=port, host='0.0.0.0', use_reloader=False)

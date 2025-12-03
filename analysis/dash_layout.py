@@ -2,6 +2,7 @@
 
 from dash import dcc, html
 from config.ui_theme import UI_COLOR
+from config.settings import TIMEFRAMES, DEFAULT_TIMEFRAME
 from analysis.dash_logic import create_blank_figure
 
 # =============================================================================
@@ -29,25 +30,45 @@ ROW_STYLE = {
 # =============================================================================
 
 def create_main_layout():
+    # 準備 Dropdown 選項
+    tf_options = [{'label': k, 'value': k} for k in TIMEFRAMES.keys()]
+
     INITIAN_DARK_FIGURE = create_blank_figure()
 
     return html.Div(style={'backgroundColor': UI_COLOR['BG_MAIN'], 'color': UI_COLOR['TEXT_MAIN'], 'height': '100vh', 'padding': '20px'}, children=[
         
         html.H2("🚀 TXF Gale Quant Engine", style={'textAlign': 'center', 'marginBottom': '5px'}),
         
-        # Scoreboard 容器
+        # 1. 戰情面板
         html.Div(id='live-status-panel', style={'marginBottom': '15px'}),
 
-        # Slider
-        html.Div([
-            html.Label("📊 顯示筆數 (Lookback Window)", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px'}),
-            dcc.Slider(
-                id='lookback-slider',
-                min=500, max=50000, step=500, value=25000,
-                marks={500: '500', 2000: '2K', 5000: '5K', 10000: '10K', 25000: '25K', 50000: '50K'},
-                tooltip={"placement": "bottom", "always_visible": True}
-            )
-        ], style={'width': '80%', 'margin': '0 auto 20px auto'}),
+        # 2. 控制區容器 (Grid 佈局：左邊選單，右邊滑桿)
+        html.Div(style={'width': '80%', 'margin': '0 auto 20px auto', 'display': 'flex', 'alignItems': 'center'}, children=[
+            
+            # 左側：週期選擇 (Dropdown)
+            html.Div(style={'width': '150px', 'marginRight': '20px'}, children=[
+                html.Label("⏱️ K線週期", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                dcc.Dropdown(
+                    id='timeframe-dropdown',
+                    options=tf_options,
+                    value=DEFAULT_TIMEFRAME,
+                    clearable=False,
+                    style={} 
+                )
+            ]),
+
+            # 右側：顯示筆數 (Slider)
+            html.Div(style={'flex': '1'}, children=[
+                html.Label("📊 顯示筆數 (Lookback Window)", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                dcc.Slider(
+                    id='lookback-slider',
+                    # ... (參數不變) ...
+                    min=500, max=50000, step=500, value=25000,
+                    marks={500: '500', 2000: '2K', 5000: '5K', 10000: '10K', 25000: '25K', 50000: '50K'},
+                    tooltip={"placement": "bottom", "always_visible": True}
+                )
+            ])
+        ]),
 
         # Charts
         dcc.Graph(id='price-chart', figure=INITIAN_DARK_FIGURE, style={'height': '55vh'}),

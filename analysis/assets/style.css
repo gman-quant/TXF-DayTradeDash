@@ -12,3 +12,44 @@ body {
 #react-entry-point {
     height: 100vh;
 }
+
+/* 2. Dropdown (React-Select) 深色模式覆寫 */
+
+/* 下拉選單的主體框 (未展開時) */
+.Select-control {
+    background-color: #222222 !important;
+    border: 1px solid #444444 !important;
+}
+
+/* 選中的文字顏色 */
+.Select-value-label {
+    color: #FFFFFF !important;
+}
+
+/* 預設佔位符文字顏色 */
+.Select-placeholder {
+    color: #888888 !important;
+}
+
+/* 展開後的選單外框 */
+.Select-menu-outer {
+    background-color: #222222 !important;
+    border: 1px solid #444444 !important;
+}
+
+/* 選項文字顏色 */
+.Select-option {
+    color: #AAAAAA !important;
+    background-color: #222222 !important;
+}
+
+/* 滑鼠移過選項時的顏色 (Hover) */
+.Select-option.is-focused {
+    background-color: #444444 !important;
+    color: #FFFFFF !important;
+}
+
+/* 移除輸入游標的白色背景 */
+.Select-input > input {
+    color: white !important;
+}

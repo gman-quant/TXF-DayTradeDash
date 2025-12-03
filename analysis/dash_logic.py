@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 import bisect
 from config.indicator_config import INDICATORS_SETUP, TYPE_OVERLAY, TYPE_OSCILLATOR
 from config.ui_theme import UI_COLOR
+from config.settings import TIMEFRAMES
 
 # =============================================================================
 # 🛠️ 輔助函數：空白圖表
@@ -27,7 +28,7 @@ def create_blank_figure():
 # =============================================================================
 # 🧠 核心邏輯：數據處理 (Data Processing)
 # =============================================================================
-def process_market_data(indicator_manager, lookback_count):
+def process_market_data(indicator_manager, lookback_count, timeframe):
     """
     處理原始數據：切片 (Slicing)、降頻 (Downsampling)、K線對齊 (Alignment)。
     
@@ -35,8 +36,13 @@ def process_market_data(indicator_manager, lookback_count):
         dict: 包含繪圖所需的所有數據陣列與狀態參數。
     """
     history = indicator_manager.history
-    candles = indicator_manager.candles
-    current_candle = indicator_manager.current_candle
+
+    # 預設 fallback 到 '1m' 以防萬一
+    tf_key = timeframe if timeframe in indicator_manager.candles else '10s'
+    # ⬇️ 獲取當前週期的毫秒數 (例如 15m = 900,000 ms)
+    period_ms = TIMEFRAMES.get(tf_key, 10000)
+    candles = indicator_manager.candles[tf_key]
+    current_candle = indicator_manager.current_candles[tf_key]
     
     raw_len = len(history['timestamp'])
     if raw_len == 0: return None
@@ -63,7 +69,8 @@ def process_market_data(indicator_manager, lookback_count):
     
     # --- 4. 準備 K 線數據 (Zero-Copy & Merge) ---
     # 使用二分搜尋法快速定位 K 線起始點 (O(log N))
-    candle_start_idx = bisect.bisect_left(candles['time'], start_ts)
+    temp_idx = bisect.bisect_left(candles['time'], start_ts)
+    candle_start_idx = max(0, temp_idx - 1) # 強制往回退一格，確保包含起始時間所在的 K 線
     
     # 切片提取 (Slicing)
     plot_candles = {
@@ -78,8 +85,15 @@ def process_market_data(indicator_manager, lookback_count):
     if current_candle and current_candle.get('time'):
         for k in plot_candles:
             plot_candles[k].append(current_candle[k])
-            
-    candle_x = pd.to_datetime(plot_candles['time'], unit='ms') + pd.Timedelta(hours=8)
+
+    
+    # =========================================================
+    # ⬇️ 2. 關鍵修正：將 K 線時間軸平移 (Shift Right)
+    # =========================================================
+    # 原本是 plot_candles['time'] (Open Time)
+    # 現在加上 period_ms，變成 Close Time
+    shifted_time = [t + period_ms for t in plot_candles['time']]
+    candle_x = pd.to_datetime(shifted_time, unit='ms') + pd.Timedelta(hours=8)
 
     # --- 5. 計算預設縮放範圍 (Zoom Sync) ---
     # 用於 "點兩下" 重置時，強制主副圖同步到此範圍
@@ -96,7 +110,8 @@ def process_market_data(indicator_manager, lookback_count):
         'step': step,
         'history': history, # 傳遞引用
         'raw_len': raw_len,
-        'default_range': default_range # 🆕
+        'default_range': default_range,
+        'timeframe': tf_key
     }
 
 # =============================================================================
@@ -105,17 +120,38 @@ def process_market_data(indicator_manager, lookback_count):
 def build_price_figure(data, xaxis_range, yaxis_range):
     """繪製主圖：K線 + 疊加指標 (VWAP/SMA)"""
     fig = create_blank_figure()
+
+    # ⬇️ 判斷週期類型
+    # 如果 timeframe 字串包含 's' (例如 '5s', '30s')，視為高頻 -> OHLC
+    # 否則 (例如 '1m', '5m', '1H') -> Candlestick
+    current_tf = data.get('timeframe', '1m')
+    is_high_freq = 's' in current_tf
     
-    # 1. 繪製 OHLC (美式單色風格)
-    fig.add_trace(go.Ohlc(
-        x=data['candle_x'],
-        open=data['candles']['open'], high=data['candles']['high'],
-        low=data['candles']['low'], close=data['candles']['close'],
-        name='5s OHLC',
-        increasing_line_color =UI_COLOR['TEXT_MAIN'], # 白線
-        decreasing_line_color =UI_COLOR['TEXT_MAIN'], # 白線
-        increasing_line_width=1, decreasing_line_width=1
-    ))
+    if is_high_freq:
+        # --- 模式 A: OHLC (單色/白色) ---
+        # 適合秒級週期，線條乾淨，適合看細微結構
+        fig.add_trace(go.Ohlc(
+            x=data['candle_x'],
+            open=data['candles']['open'], high=data['candles']['high'],
+            low=data['candles']['low'], close=data['candles']['close'],
+            name=f'{current_tf} OHLC',
+            increasing_line_color=UI_COLOR['TEXT_MAIN'], 
+            decreasing_line_color=UI_COLOR['TEXT_MAIN'], 
+            increasing_line_width=1, decreasing_line_width=1
+        ))
+    else:
+        # --- 模式 B: Candlestick (紅漲綠跌) ---
+        # 適合分級週期，實體顏色能快速反映多空力道
+        fig.add_trace(go.Candlestick(
+            x=data['candle_x'],
+            open=data['candles']['open'], high=data['candles']['high'],
+            low=data['candles']['low'], close=data['candles']['close'],
+            name=f'{current_tf} Candlestick',
+            increasing_line_color=UI_COLOR['UP'], 
+            decreasing_line_color=UI_COLOR['DOWN'],
+            increasing_fillcolor=UI_COLOR['UP'],
+            decreasing_fillcolor=UI_COLOR['DOWN']
+        ))
     
     # 2. 動態繪製 Overlays (依據 Config)
     for ind in INDICATORS_SETUP:
@@ -205,14 +241,14 @@ def build_momentum_figure(data, xaxis_range):
         # 左側 Y 軸 (Delta)
         yaxis=dict(
             visible=True, showgrid=True, gridcolor='#333',
-            title=dict(text='Delta', font=dict(color=UI_COLOR['TEXT_MAIN'], size=10)),
+            title=dict(text='Delta', font=dict(color=UI_COLOR['TEXT_MAIN'], size=16)),
             side='left'
         ),
         
         # 右側 Y 軸 (CVD)
         yaxis2=dict(
             visible=True, showgrid=False, 
-            title=dict(text='CVD', font=dict(color=UI_COLOR['TEXT_MAIN'], size=10)),
+            title=dict(text='CVD', font=dict(color=UI_COLOR['TEXT_MAIN'], size=16)),
             overlaying='y', # 疊加
             side='right', 
             tickformat=',.0f'

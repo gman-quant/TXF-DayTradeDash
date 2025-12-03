@@ -3,6 +3,7 @@
 import numpy as np
 import core.numba_engine as engine
 from config.indicator_config import INDICATORS_SETUP
+from config.settings import TIMEFRAMES
 
 class IndicatorManager:
     """
@@ -26,15 +27,17 @@ class IndicatorManager:
             "price": [],
         }
         
-        # ==========================================
-        # 2. K 線相關設定
-        # ==========================================
-        self.candles = {
-            'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': []
-        }
-        self.current_candle = {} # 暫存當前正在形成的 K 線
-        # K 線週期：在此設定 (例如 15分鐘 = 15 * 60 * 1000)
-        self.aggregation_period_ms = 5 * 1000 
+        # 2. 🆕 多週期 K 線容器
+        # 結構變更： self.candles['1m']['open'] ...
+        self.candles = {}
+        self.current_candles = {} # 暫存各週期的當前 K 線
+        
+        # 初始化所有週期
+        for tf_name in TIMEFRAMES:
+            self.candles[tf_name] = {
+                'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': []
+            }
+            self.current_candles[tf_name] = {}
 
         # ==========================================
         # 3. ⚡️ 預先綁定 (Pre-binding) 邏輯
@@ -88,33 +91,38 @@ class IndicatorManager:
 
     def _update_candles(self, tick_time_ms, price, volume):
         """
-        K 線聚合邏輯
+        🆕 同時更新所有週期的 K 線
         """
-        bucket_time_ms = (tick_time_ms // self.aggregation_period_ms) * self.aggregation_period_ms
-        
-        if not self.current_candle or self.current_candle['time'] != bucket_time_ms:
-            # 1. 關閉並儲存舊 K 線
-            if self.current_candle:
-                for k, v in self.current_candle.items():
-                    if k != 'new_tick': self.candles[k].append(v)
+        for tf_name, period_ms in TIMEFRAMES.items():
+            # 計算該週期的 Bucket Time
+            bucket_time_ms = (tick_time_ms // period_ms) * period_ms
             
-            # 2. 初始化新 K 線
-            self.current_candle = {
-                'time': bucket_time_ms,
-                'open': price,
-                'high': price,
-                'low': price,
-                'close': price,
-                'volume': volume,
-                'new_tick': True 
-            }
-        else:
-            # 3. 更新當前 K 線
-            self.current_candle['high'] = max(self.current_candle['high'], price)
-            self.current_candle['low'] = min(self.current_candle['low'], price)
-            self.current_candle['close'] = price
-            self.current_candle['volume'] += volume
-            self.current_candle['new_tick'] = True
+            curr = self.current_candles[tf_name]
+            storage = self.candles[tf_name]
+            
+            if not curr or curr['time'] != bucket_time_ms:
+                # 1. 關閉舊 K 線
+                if curr:
+                    for k, v in curr.items():
+                        if k != 'new_tick': storage[k].append(v)
+                
+                # 2. 開新 K 線
+                self.current_candles[tf_name] = {
+                    'time': bucket_time_ms,
+                    'open': price,
+                    'high': price,
+                    'low': price,
+                    'close': price,
+                    'volume': volume,
+                    'new_tick': True 
+                }
+            else:
+                # 3. 更新當前 K 線
+                curr['high'] = max(curr['high'], price)
+                curr['low'] = min(curr['low'], price)
+                curr['close'] = price
+                curr['volume'] += volume
+                curr['new_tick'] = True
 
     def on_tick(self, snapshot_tuple):
         """
