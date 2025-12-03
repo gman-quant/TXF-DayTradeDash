@@ -95,8 +95,17 @@ def start_dashboard_server(indicator_manager, port=8050):
             # =========================================================
             # 3. 決定 X 軸範圍
             # =========================================================
-            # 如果是點兩下重置 (xaxis_range is None)，就用 data_pack 算出的全範圍
-            final_xaxis_range = xaxis_range if (xaxis_range and xaxis_range[0]) else data_pack['default_range']
+            # 判斷是否需要強制重置範圍 (Force Reset)
+            # 條件 A: 觸發源是「週期選單 (timeframe-dropdown)」
+            # 條件 B: 使用者點兩下重置了 (xaxis_range 為空)
+            force_reset = (trigger_id == 'timeframe-dropdown') or not (xaxis_range and xaxis_range[0])
+            
+            if force_reset:
+                # 強制使用系統計算的 "最佳預設範圍" (包含右側預留空間)
+                final_xaxis_range = data_pack['default_range']
+            else:
+                # 其他情況 (定時更新、拉滑桿)，保持使用者目前的縮放位置
+                final_xaxis_range = xaxis_range
 
             # =========================================================
             # 4. 生成圖表

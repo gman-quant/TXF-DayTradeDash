@@ -98,7 +98,19 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
     # --- 5. 計算預設縮放範圍 (Zoom Sync) ---
     # 用於 "點兩下" 重置時，強制主副圖同步到此範圍
     if len(tick_x_axis) > 0:
-        default_range = [tick_x_axis.min(), tick_x_axis.max()]
+        # 1. 找出視野內最後一筆 Tick 的時間
+        last_visible_ts = timestamps[-1]
+        
+        # 2. 計算該 Tick 所屬 K 棒的「結束時間」
+        # 公式：(Tick // Period) * Period + Period
+        current_candle_end_ts = (last_visible_ts // period_ms) * period_ms + period_ms
+        
+        # 3. 轉換為與圖表一致的格式 (UTC+8)
+        x_max_ts = current_candle_end_ts + period_ms // 2
+        x_min = tick_x_axis.min()
+        x_max = pd.to_datetime(x_max_ts, unit='ms') + pd.Timedelta(hours=8)
+        
+        default_range = [x_min, x_max]
     else:
         default_range = None
 
@@ -188,74 +200,118 @@ def build_momentum_figure(data, xaxis_range):
     """繪製副圖：CVD (右軸) + Delta (左軸)"""
     fig = create_blank_figure()
 
-    for ind in INDICATORS_SETUP:
-        if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']:
+    valid_indicators = [
+        ind for ind in INDICATORS_SETUP 
+        if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']
+    ]
+
+    # =========================================================
+    # Layer 1: CVD 背景填充 (紅綠分色)
+    # =========================================================
+    for ind in valid_indicators:
+        if ind['id'] == 'Session_CVD':
             y_data = data['history'][ind['id']][data['start_idx']::data['step']]
+            target_yaxis = ind.get('yaxis', 'y')
             
-            # 判斷是否使用右軸 (y2)
-            target_yaxis = ind.get('yaxis', 'y') 
+            # 1. 製作正值數據 (小於0的部分設為0)
+            y_pos = [max(0, v) for v in y_data]
+            # 2. 製作負值數據 (大於0的部分設為0)
+            y_neg = [min(0, v) for v in y_data]
 
-            # A. Delta (柱狀圖)：紅綠變色
-            if ind.get('color') == 'dynamic':
-                cols = [UI_COLOR['DOWN'] if v < 0 else UI_COLOR['UP'] for v in y_data]
-                fig.add_trace(go.Bar(
-                    x=data['tick_x'], y=y_data, 
-                    marker_color=cols, 
-                    name=ind['id'], 
-                    marker_line_width=0,
-                    opacity=0.8, 
-                    yaxis=target_yaxis
-                ))
+            # 🟢 正值填充 (綠色)
+            fig.add_trace(go.Scatter(
+                x=data['tick_x'], y=y_pos,
+                mode='lines',
+                line=dict(width=0), # 不顯示邊線，只顯示填充
+                fill='tozeroy',
+                fillcolor='rgba(46, 204, 64, 0.15)', # UI_COLOR['UP'] with opacity
+                hoverinfo='skip', # 滑鼠經過不顯示資訊 (避免干擾)
+                yaxis=target_yaxis,
+                showlegend=False
+            ))
+
+            # 🔴 負值填充 (紅色)
+            fig.add_trace(go.Scatter(
+                x=data['tick_x'], y=y_neg,
+                mode='lines',
+                line=dict(width=0),
+                fill='tozeroy',
+                fillcolor='rgba(255, 65, 54, 0.15)', # UI_COLOR['DOWN'] with opacity
+                hoverinfo='skip',
+                yaxis=target_yaxis,
+                showlegend=False
+            ))
+
+    # =========================================================
+    # Layer 2: Delta 柱狀圖 (保持不變)
+    # =========================================================
+    for ind in valid_indicators:
+        if ind.get('color') == 'dynamic':
+            y_data = data['history'][ind['id']][data['start_idx']::data['step']]
+            target_yaxis = ind.get('yaxis', 'y')
+            cols = [UI_COLOR['UP'] if v >= 0 else UI_COLOR['DOWN'] for v in y_data] # 綠漲紅跌
             
-            # B. CVD (累積線)：面積圖風格
-            elif ind['id'] == 'Session_CVD': 
-                # 使用 go.Scatter (SVG) 以確保 fill 效果正確 (WebGL fill 有時會破圖)
-                fig.add_trace(go.Scatter(
-                    x=data['tick_x'], y=y_data, 
-                    mode='lines', 
-                    name=ind['id'],
-                    line=dict(color=UI_COLOR['HIGHLIGHT'], width=1.5), # 金色
-                    fill='tozeroy',                        # 填滿至 0 軸
-                    fillcolor='rgba(255, 215, 0, 0.1)',    # 淡金背景
-                    yaxis=target_yaxis
-                ))
-                
-            # C. 其他普通線圖
-            else:
-                fig.add_trace(go.Scattergl(
-                    x=data['tick_x'], y=y_data, 
-                    mode='lines', name=ind['id'],
-                    line=dict(color=ind['color'], width=1.5),
-                    yaxis=target_yaxis
-                ))
+            fig.add_trace(go.Bar(
+                x=data['tick_x'], y=y_data, 
+                marker_color=cols, name=ind['id'], 
+                marker_line_width=0, opacity=0.9, 
+                yaxis=target_yaxis
+            ))
 
-    # Layout 設定 (雙軸)
+    # =========================================================
+    # Layer 3: CVD 主線與其他指標 (最上層)
+    # =========================================================
+    for ind in valid_indicators:
+        # 跳過已經畫過的動態柱狀圖
+        if ind.get('color') == 'dynamic': continue
+
+        y_data = data['history'][ind['id']][data['start_idx']::data['step']]
+        target_yaxis = ind.get('yaxis', 'y')
+
+        if ind['id'] == 'Session_CVD': 
+            # 🟡 CVD 金色主線 (不填充，因為 Layer 1 已經填了)
+            fig.add_trace(go.Scatter(
+                x=data['tick_x'], y=y_data, 
+                mode='lines', name=ind['id'],
+                line=dict(color=UI_COLOR['HIGHLIGHT'], width=0.5), # 金色實線
+                yaxis=target_yaxis
+            ))
+        else:
+            # 其他普通線圖
+            fig.add_trace(go.Scattergl(
+                x=data['tick_x'], y=y_data, mode='lines', name=ind['id'],
+                line=dict(color=ind['color'], width=1.5),
+                yaxis=target_yaxis
+            ))
+
+    # =========================================================
+    # Layout 設定
+    # =========================================================
     fig.update_layout(
         template='plotly_dark',
         margin=dict(l=40, r=40, t=10, b=10),
         uirevision='constant',
         
-        # 強制應用主圖的 X 軸範圍 (同步)
         xaxis=dict(visible=True, showgrid=True, range=xaxis_range),
         
-        # 左側 Y 軸 (Delta)
+        # 左軸 (Delta)
         yaxis=dict(
             visible=True, showgrid=True, gridcolor='#333',
-            title=dict(text='Delta', font=dict(color=UI_COLOR['TEXT_MAIN'], size=16)),
+            #title=dict(text='Delta', font=dict(color=UI_COLOR['TEXT_MAIN'], size=10)),
             side='left'
         ),
         
-        # 右側 Y 軸 (CVD)
+        # 右軸 (CVD)
         yaxis2=dict(
             visible=True, showgrid=False, 
-            title=dict(text='CVD', font=dict(color=UI_COLOR['TEXT_MAIN'], size=16)),
-            overlaying='y', # 疊加
-            side='right', 
-            tickformat=',.0f'
+            #title=dict(text='CVD', font=dict(color=UI_COLOR['TEXT_MAIN'], size=10)),
+            overlaying='y', side='right', tickformat=',.0f',
+            # ⬇️ 關鍵：加上一條白色的 0 軸線，區隔多空
+            zeroline=True, zerolinewidth=1, zerolinecolor='rgba(255,255,255,0.3)'
         ),
         
         hovermode='x unified', 
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        showlegend=True # 強制顯示圖例 (即使只有一條線)
+        showlegend=True
     )
     return fig
