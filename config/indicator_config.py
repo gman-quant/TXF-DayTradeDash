@@ -79,9 +79,9 @@ INDICATORS_SETUP = [
     },
     # --- 移動平均線 (SMA) ---
     {
-        'id': 'SMA_180',        
+        'id': 'SMA_60',        
         'func': 'calc_sma',           
-        'args': [180],                 
+        'args': [60],                 
         'type': TYPE_OVERLAY,        
         'inputs': ['close'], 
         'color': "#FFF000",           
@@ -134,7 +134,7 @@ INDICATORS_SETUP = [
         'args': [0],
         'type': TYPE_OSCILLATOR,
         'inputs': ['cum_buy_vol', 'cum_sell_vol'],
-        'color': '#00F0FF', # 青色實線
+        'color': "#FFF000",
         'style': 'solid',
         'yaxis': 'y2'       # 🆕 新增：指定使用右側 Y 軸
     },

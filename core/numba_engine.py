@@ -374,6 +374,8 @@ def calc_period_delta(cum_buy: np.ndarray,
     計算區間 Delta (例如過去 60 筆的淨買量)
     公式: (買量變化) - (賣量變化)
     """
+    if head <= period: return np.nan
+    
     curr_idx = head - 1
     if curr_idx < 0: curr_idx += capacity
     

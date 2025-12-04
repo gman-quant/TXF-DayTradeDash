@@ -11,7 +11,8 @@ from analysis.dash_logic import (
     create_blank_figure, 
     process_market_data, 
     build_price_figure, 
-    build_momentum_figure
+    build_momentum_figure,
+    get_last_value
 )
 
 try:
@@ -67,15 +68,14 @@ def start_dashboard_server(indicator_manager, port=8050):
             trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'interval-component'
 
             # =========================================================
-            # 🚀 效率優化 1: 提早檢查 (Early Peek)
+            # 🚀 效率優化 1: 提早檢查 (Early Peek) - RingBuffer 版
             # =========================================================
-            # 直接讀取 Manager 的原始列表長度，這是 O(1) 操作，極快
-            raw_history = indicator_manager.history
-            if not raw_history['timestamp']:
+            # 查是否有資料
+            if indicator_manager.count == 0:
                 return NO_DATA_FIGURE, NO_DATA_FIGURE, "Waiting for data...", dash.no_update
 
-            # 直接讀取最新時間戳 (不經過 process_market_data)
-            current_latest_ts = raw_history['timestamp'][-1]
+            # 獲取最新時間戳
+            current_latest_ts = indicator_manager.get_latest_timestamp()
 
             # ⚡️ 關鍵優化：如果是由定時器觸發，且數據沒變，立刻停止！
             # 這樣就省下了後面 process_market_data 的切片和運算成本
@@ -86,6 +86,8 @@ def start_dashboard_server(indicator_manager, port=8050):
             # =========================================================
             # 2. 處理數據 (只有在需要更新時才執行)
             # =========================================================
+            # 注意：process_market_data 內部必須改寫以支援從 RingBuffer 切片
+            # 這裡回傳的 data_pack 應該要是已經切好的 NumPy Array 或 List
             data_pack = process_market_data(indicator_manager, lookback_count, timeframe)
             
             # 雙重防呆 (理論上上面已經擋過了，但為了型別安全保留)
@@ -119,19 +121,17 @@ def start_dashboard_server(indicator_manager, port=8050):
             hist = data_pack['history']
             last_price = hist['price'][-1]
             
-            def get_val(k): return hist[k][-1] if k in hist and hist[k] else 0
-            
             scoreboard = create_scoreboard_html(
                 last_price = last_price,
                 change = last_price - PREV_CLOSE_PRICE,
                 change_pct = ((last_price - PREV_CLOSE_PRICE)/PREV_CLOSE_PRICE)*100,
                 open_price = hist['price'][0],
-                high = get_val('Session_High'),
-                low = get_val('Session_Low'),
-                vol = get_val('Total_Vol'),
-                vwap = get_val('Session_VWAP'),
+                high = get_last_value(hist, 'Session_High'),
+                low = get_last_value(hist, 'Session_Low'),
+                vol = get_last_value(hist, 'Total_Vol'),
+                vwap = get_last_value(hist, 'Session_VWAP'),
                 prev_close = PREV_CLOSE_PRICE,
-                underlying_price = get_val('Underlying_Price')
+                underlying_price = get_last_value(hist, 'Underlying_Price')
             )
 
             return fig_price, fig_mom, scoreboard, current_latest_ts

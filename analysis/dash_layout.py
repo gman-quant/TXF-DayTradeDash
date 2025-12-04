@@ -165,7 +165,7 @@ def create_scoreboard_html(last_price, change, change_pct, open_price, high, low
             # ⬇️ COLUMN 4: 跨市與流量 (Cross-Market & Magnitude)
             html.Div(children=[
                 html.Div([html.Span("現貨價: ", style=LABEL_STYLE), html.Span(f"{underlying_price:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
-                html.Div([html.Span("基　差: ", style=LABEL_STYLE), html.Span(f"{basis_sign}{basis:.2f}", style={'color': basis_color, 'fontWeight': 'bold'})], style=ROW_STYLE),
+                html.Div([html.Span("價　差: ", style=LABEL_STYLE), html.Span(f"{basis_sign}{basis:.2f}", style={'color': basis_color, 'fontWeight': 'bold'})], style=ROW_STYLE),
                 html.Div([html.Span("總　量: ", style=LABEL_STYLE), html.Span(f"{vol:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
             ]),
         ])
