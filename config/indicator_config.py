@@ -129,7 +129,7 @@ INDICATORS_SETUP = [
 
     # 1. 當盤 CVD (數值大 -> 用右軸 y2)
     {
-        'id': 'Session_CVD',
+        'id': 'CVD',
         'func': 'calc_session_cvd',
         'args': [0],
         'type': TYPE_OSCILLATOR,
@@ -141,7 +141,7 @@ INDICATORS_SETUP = [
     
     # 2. 短線 Delta (數值小 -> 用預設左軸)
     {
-        'id': 'Delta_180',
+        'id': 'RCVD_180',
         'func': 'calc_period_delta',
         'args': [180],
         'type': TYPE_OSCILLATOR,
@@ -149,6 +149,52 @@ INDICATORS_SETUP = [
         'color': 'dynamic',
         'style': 'bar'
         # 沒寫 yaxis 預設就是 y1 (左軸)
+    },
+    
+    # 1. 🟢 螞蟻搬象 (Retail Flow)
+    # 監控 1~4 口的散戶動向。
+    # 這是市場的「背景噪音」或「反向指標」。
+    {
+        'id': 'Retail_Flow',
+        'func': 'calc_small_lot_net',
+        'type': TYPE_OSCILLATOR,
+        'color': '#00FF00',  # 綠色
+        'inputs': ['volume', 'type'], 
+        'args': [300, 5],    # 統計 < 5 的單
+        'yaxis': 'y',
+        'style': 'bar'
+    },
+
+    # 2. 🟡 主力部隊 (Smart Money)
+    # 監控 >= 5 口的單。
+    # 日盤：這是中實戶與程式單。
+    # 夜盤：這就是主力了！
+    {
+        'id': 'Smart_Money', # 改個名字，這是一般大戶
+        'func': 'calc_large_lot_net',
+        'type': TYPE_OSCILLATOR,
+        'color': '#FFFF00',  # 黃色
+        'inputs': ['volume', 'type'], 
+        'args': [300, 5],    # 統計 >= 5 的單
+        'yaxis': 'y',
+        'style': 'bar'
+    },
+
+    # 3. 🔴 巨鱷核彈 (Whale Nuke) - 專門抓那筆 299 口的
+    # 監控 >= 20 口的超大單。
+    # 這種單出現時，通常是日盤的「趨勢發動點」或「停損引爆」。
+    # 夜盤可能幾天都看不到一根，但一出來就是送分題。
+    {
+        'id': 'Whale_Nuke',
+        'func': 'calc_large_lot_net',
+        'type': TYPE_OSCILLATOR,
+        'color': '#FF0000',  # 紅色 (極度顯眼)
+        'inputs': ['volume', 'type'], 
+        'args': [300, 20],   # 門檻拉高到 20
+        'yaxis': 'y',
+        'style': 'bar'
     }
+
+    
 
 ]

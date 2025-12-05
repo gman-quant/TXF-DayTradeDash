@@ -214,6 +214,7 @@ class IndicatorManager:
         close_val = snapshot_tuple[0][curr_idx]
         time_val  = snapshot_tuple[3][curr_idx]
         vol_val   = snapshot_tuple[1][curr_idx]
+        # print(f"DEBUG: Vol={snapshot_tuple[1][curr_idx]}, Type={snapshot_tuple[2][curr_idx]}")
 
         # ==========================================
         # 3. 更新基礎歷史數據 (直接寫入 Array)

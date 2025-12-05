@@ -1,11 +1,12 @@
 # analysis/dashboard_server.py
 
 import dash
+import traceback
 from dash import callback_context
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
-# 引入拆分後的模組
+# --- Local Modules ---
 from analysis.dash_layout import create_main_layout, create_scoreboard_html
 from analysis.dash_logic import (
     create_blank_figure, 
@@ -15,6 +16,7 @@ from analysis.dash_logic import (
     get_last_value
 )
 
+# --- Configuration ---
 try:
     from config.settings import PREV_CLOSE_PRICE
 except ImportError:
@@ -22,12 +24,22 @@ except ImportError:
 
 
 def start_dashboard_server(indicator_manager, port=8050):
+    """
+    啟動 Dash 儀表板伺服器。
+    
+    Args:
+        indicator_manager: 負責管理 RingBuffer 數據的核心物件
+        port: 伺服器端口 (預設 8050)
+    """
     NO_DATA_FIGURE = create_blank_figure()
 
     app = dash.Dash(__name__)
     app.layout = create_main_layout()
 
-    # --- Callback: Zoom ---
+    # =========================================================================
+    # 🎮 Callback 1: Zoom State Management (縮放狀態管理)
+    # 負責處理使用者手動縮放、拖曳以及「重置視野」的邏輯
+    # =========================================================================
     @app.callback(
         [Output('price-xaxis-range', 'data'), Output('price-yaxis-range', 'data')],
         [Input('price-chart', 'relayoutData'),
@@ -38,18 +50,43 @@ def start_dashboard_server(indicator_manager, port=8050):
         if not ctx.triggered:
             raise PreventUpdate
             
+        # 判斷觸發源是主圖 (price) 還是副圖 (momentum)
         trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
         relayoutData = price_relayout if trigger_id == 'price-chart' else mom_relayout
         
         if relayoutData:
-            if 'xaxis.autorange' in relayoutData or 'yaxis.autorange' in relayoutData:
+            # ---------------------------------------------------------
+            # 情境 A: 手動縮放/拖曳 (Manual Zoom/Pan)
+            # ---------------------------------------------------------
+            # Plotly 傳回明確的 range 數值，代表使用者想鎖定這個視野
+            if 'xaxis.range[0]' in relayoutData and 'xaxis.range[1]' in relayoutData:
+                new_x_range = [relayoutData['xaxis.range[0]'], relayoutData['xaxis.range[1]']]
+                
+                # 目前 Y 軸設為自動 (None)，若未來想記憶 Y 軸可在此擴充
+                return new_x_range, None
+
+            # ---------------------------------------------------------
+            # 情境 B: 重置訊號 (Reset / Double Click)
+            # ---------------------------------------------------------
+            # 偵測到以下 Key 代表使用者想回到「預設視野」:
+            # - autosize: 點擊工具列 "Reset axes" (房子圖示)
+            # - xaxis.autorange: 點擊圖表兩下
+            is_reset = (
+                'xaxis.autorange' in relayoutData or 
+                'yaxis.autorange' in relayoutData or 
+                'autosize' in relayoutData
+            )
+            
+            if is_reset:
+                # 🚀 關鍵：回傳 None，通知 update_dashboard 進入「強制重置」模式
                 return None, None
-            xaxis_range = relayoutData.get('xaxis.range[0]'), relayoutData.get('xaxis.range[1]')
-            if xaxis_range != (None, None) and xaxis_range[0] is not None:
-                 return xaxis_range, None 
+
         raise PreventUpdate
 
-    # --- Callback: Main Update ---
+    # =========================================================================
+    # 🔄 Callback 2: Main Dashboard Update (核心更新邏輯)
+    # 負責定時從 RingBuffer 拉取數據、計算指標並更新圖表
+    # =========================================================================
     @app.callback(
         [Output('price-chart', 'figure'),
          Output('momentum-chart', 'figure'),
@@ -67,57 +104,72 @@ def start_dashboard_server(indicator_manager, port=8050):
             ctx = callback_context
             trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'interval-component'
 
-            # =========================================================
-            # 🚀 效率優化 1: 提早檢查 (Early Peek) - RingBuffer 版
-            # =========================================================
-            # 查是否有資料
+            # ---------------------------------------------------------
+            # 1. 🚀 效能優化: Early Peek (提早檢查)
+            # ---------------------------------------------------------
+            # 檢查 RingBuffer 是否有資料 (O(1) 操作)
             if indicator_manager.count == 0:
                 return NO_DATA_FIGURE, NO_DATA_FIGURE, "Waiting for data...", dash.no_update
 
-            # 獲取最新時間戳
+            # 獲取最新資料時間戳 (O(1) 操作)
             current_latest_ts = indicator_manager.get_latest_timestamp()
 
-            # ⚡️ 關鍵優化：如果是由定時器觸發，且數據沒變，立刻停止！
-            # 這樣就省下了後面 process_market_data 的切片和運算成本
+            # 如果是由定時器觸發，且數據時間沒變，直接跳過不運算
             if trigger_id == 'interval-component':
+                # 注意：這裡使用 float 比較，建議確保精度一致
                 if n > 0 and current_latest_ts == last_ts_stored:
                     raise PreventUpdate
 
-            # =========================================================
-            # 2. 處理數據 (只有在需要更新時才執行)
-            # =========================================================
-            # 注意：process_market_data 內部必須改寫以支援從 RingBuffer 切片
-            # 這裡回傳的 data_pack 應該要是已經切好的 NumPy Array 或 List
+            # ---------------------------------------------------------
+            # 2. 數據處理 (Data Processing)
+            # ---------------------------------------------------------
+            # 從 RingBuffer 切片並降頻，取得繪圖所需陣列
             data_pack = process_market_data(indicator_manager, lookback_count, timeframe)
             
-            # 雙重防呆 (理論上上面已經擋過了，但為了型別安全保留)
             if not data_pack:
                 return NO_DATA_FIGURE, NO_DATA_FIGURE, "Processing Error...", dash.no_update
 
-            # =========================================================
-            # 3. 決定 X 軸範圍
-            # =========================================================
-            # 判斷是否需要強制重置範圍 (Force Reset)
-            # 條件 A: 觸發源是「週期選單 (timeframe-dropdown)」
-            # 條件 B: 使用者點兩下重置了 (xaxis_range 為空)
+            # ---------------------------------------------------------
+            # 3. 視野控制策略 (Viewport Strategy)
+            # ---------------------------------------------------------
+            # 判斷是否需要強制重置範圍
+            # - 切換週期 (timeframe) 時強制重置
+            # - 使用者觸發了 Reset (xaxis_range 變成 None) 時強制重置
             force_reset = (trigger_id == 'timeframe-dropdown') or not (xaxis_range and xaxis_range[0])
             
             if force_reset:
-                # 強制使用系統計算的 "最佳預設範圍" (包含右側預留空間)
+                # [自動跟隨模式]
+                # 使用系統計算的最佳範圍 (包含右側留白)
                 final_xaxis_range = data_pack['default_range']
+                
+                # 🔥 關鍵修正：打破 'constant' 鎖定
+                # 當進入自動模式時，使用動態的 revision (時間戳)，強迫副圖跟隨主圖重繪
+                current_uirevision = str(current_latest_ts)
             else:
-                # 其他情況 (定時更新、拉滑桿)，保持使用者目前的縮放位置
+                # [手動縮放模式]
+                # 保持使用者目前的縮放位置
                 final_xaxis_range = xaxis_range
+                
+                # 使用 'constant' 鎖定狀態，避免定時更新導致畫面跳動
+                current_uirevision = 'constant'
 
-            # =========================================================
-            # 4. 生成圖表
-            # =========================================================
-            fig_price = build_price_figure(data_pack, final_xaxis_range, yaxis_range)
-            fig_mom = build_momentum_figure(data_pack, final_xaxis_range) 
+            # ---------------------------------------------------------
+            # 4. 生成圖表 (Visualization)
+            # ---------------------------------------------------------
+            # 🔥 務必傳入 uirevision 參數
+            fig_price = build_price_figure(
+                data_pack, final_xaxis_range, yaxis_range, 
+                uirevision=current_uirevision
+            )
             
-            # =========================================================
-            # 5. 生成 Scoreboard
-            # =========================================================
+            fig_mom = build_momentum_figure(
+                data_pack, final_xaxis_range, 
+                uirevision=current_uirevision
+            )
+            
+            # ---------------------------------------------------------
+            # 5. 生成計分板 (Scoreboard)
+            # ---------------------------------------------------------
             hist = data_pack['history']
             last_price = hist['price'][-1]
             
@@ -127,8 +179,8 @@ def start_dashboard_server(indicator_manager, port=8050):
                 change_pct = ((last_price - PREV_CLOSE_PRICE)/PREV_CLOSE_PRICE)*100,
                 open_price = hist['price'][0],
                 high = get_last_value(hist, 'Session_High'),
-                low = get_last_value(hist, 'Session_Low'),
-                vol = get_last_value(hist, 'Total_Vol'),
+                low  = get_last_value(hist, 'Session_Low'),
+                vol  = get_last_value(hist, 'Total_Vol'),
                 vwap = get_last_value(hist, 'Session_VWAP'),
                 prev_close = PREV_CLOSE_PRICE,
                 underlying_price = get_last_value(hist, 'Underlying_Price')
@@ -139,8 +191,7 @@ def start_dashboard_server(indicator_manager, port=8050):
         except PreventUpdate:
             raise
         except Exception as e:
-            import traceback
-            # 這裡建議保留 print，方便除錯
+            # 捕捉未預期錯誤並打印，避免 Server 崩潰
             print(f"❌ Dash Error: {traceback.format_exc()}")
             return NO_DATA_FIGURE, NO_DATA_FIGURE, f"Error: {str(e)}", dash.no_update
 

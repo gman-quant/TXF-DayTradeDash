@@ -368,22 +368,98 @@ def calc_session_cvd(cum_buy: np.ndarray,
 def calc_period_delta(cum_buy: np.ndarray, 
                       cum_sell: np.ndarray, 
                       head: int, 
-                      period: int, 
+                      window: int, 
                       capacity: int) -> float:
     """
     計算區間 Delta (例如過去 60 筆的淨買量)
     公式: (買量變化) - (賣量變化)
     """
-    if head <= period: return np.nan
+    if head <= window: return np.nan
     
     curr_idx = head - 1
     if curr_idx < 0: curr_idx += capacity
     
-    prev_idx = head - 1 - period
+    prev_idx = head - 1 - window
     if prev_idx < 0: prev_idx += capacity
     
     # 計算區間內的買量與賣量
-    period_buy  = cum_buy[curr_idx]  - cum_buy[prev_idx]
-    period_sell = cum_sell[curr_idx] - cum_sell[prev_idx]
+    window_buy  = cum_buy[curr_idx]  - cum_buy[prev_idx]
+    window_sell = cum_sell[curr_idx] - cum_sell[prev_idx]
     
-    return float(period_buy - period_sell)
+    return float(window_buy - window_sell)
+
+@jit(nopython=True, cache=True)
+def calc_large_lot_net(vol_arr: np.ndarray, 
+                       type_arr: np.ndarray, 
+                       head: int, 
+                       window: int, 
+                       threshold: float,
+                       capacity: int, 
+                       ) -> float:
+    """
+    計算大單淨量 (Whale Flow)。
+    邏輯：統計單筆成交量 >= threshold 的單子。
+    Type: 1=Buy (加), 2=Sell (減)。
+    """
+    # 1. 確保回溯數據足夠
+    if head <= window: return np.nan
+
+    curr_idx = head - 1
+    net_large_vol = 0.0
+    
+    # 2. 開始回溯
+    for i in range(window):
+        idx = curr_idx - i
+        # 環狀索引處理
+        if idx < 0: idx += capacity
+        
+        v = vol_arr[idx]
+        
+        # 🔥 過濾條件：只計算大於等於門檻的單 (threshold)
+        # 因為輸入是 int32，這裡比較 (int >= float) 是安全的，Numba 會處理
+        if v >= threshold:
+            t_val = type_arr[idx]
+            
+            # 🔥 根據你的 Log 修正邏輯：
+            # 1 = 外盤 (主動買) -> 增加淨量
+            # 2 = 內盤 (主動賣) -> 減少淨量
+            if t_val == 1:
+                net_large_vol += v
+            elif t_val == 2:
+                net_large_vol -= v
+            
+    return net_large_vol
+
+@jit(nopython=True, cache=True)
+def calc_small_lot_net(vol_arr: np.ndarray, 
+                       type_arr: np.ndarray, 
+                       head: int, 
+                       window: int, 
+                       threshold: float, # 用同樣的門檻
+                       capacity: int) -> float:
+    """
+    計算小單淨量 (Retail Flow / Ant Flow)。
+    邏輯：只統計單筆成交量 < threshold 的單子。
+    Type: 1=Buy, 2=Sell
+    """
+    if head <= window: return np.nan
+
+    curr_idx = head - 1
+    net_small_vol = 0.0
+    
+    for i in range(window):
+        idx = curr_idx - i
+        if idx < 0: idx += capacity
+        
+        v = vol_arr[idx]
+        
+        # 🔥 核心差異：只計算「小於」門檻的單 (螞蟻單)
+        if v < threshold:
+            t_val = type_arr[idx]
+            
+            if t_val == 1:
+                net_small_vol += v
+            elif t_val == 2:
+                net_small_vol -= v
+            
+    return net_small_vol
