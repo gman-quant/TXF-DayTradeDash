@@ -19,10 +19,10 @@ class GaleKafkaConsumer:
     3. 以 Async Iterator 方式持續產出數據。
     """
 
-    def __init__(self, broker_url: str, group_id: str, topic: str):
+    def __init__(self, broker_url: str, group_id: str, topics: list):
         self.broker_url = broker_url
         self.group_id = group_id
-        self.topic = topic
+        self.topics = topics
         self.consumer: Optional[Consumer] = None
         self.logger = logging.getLogger(__name__)
 
@@ -38,46 +38,31 @@ class GaleKafkaConsumer:
         self.logger.info(f"Connected to Kafka broker: {self.broker_url}")
 
     def seek_to_time(self, start_dt: datetime):
-        """
-        關鍵邏輯：根據 datetime 查找並定位 Offset。
-        """
-        if not self.consumer:
-            raise RuntimeError("Consumer not connected. Call connect() first.")
-
-        # 1. 轉換 datetime 為 Unix Timestamp (毫秒)
-        # TXF 位於 UTC+8，假設傳入的 start_dt 已經是正確的本地時間 (naive or aware)
-        # 這裡為了保險，先轉為 timestamp float 再乘 1000
+        """(Live 模式用) 定位到指定時間"""
+        if not self.consumer: raise RuntimeError("Not connected")
+        
         ts_ms = int(start_dt.timestamp() * 1000)
-
         self.logger.info(f"Seeking to time: {start_dt} (Timestamp: {ts_ms})")
+        
+        partitions = [TopicPartition(t, 0) for t in self.topics]
+        for p in partitions: p.offset = ts_ms
+            
+        offsets_found = self.consumer.offsets_for_times(partitions, timeout=10.0)
+        
+        for tp in offsets_found:
+            if tp.offset != -1:
+                self.consumer.assign([tp])
+                self.consumer.seek(tp)
+                self.logger.info(f"Topic {tp.topic} seek to offset {tp.offset}")
+            else:
+                self.logger.warning(f"Topic {tp.topic} offset not found for time {start_dt}")
+                self.consumer.assign([tp])
 
-        # 2. 獲取該 Topic 的分區 (假設單一分區 Partition 0，或是處理所有分區)
-        # 先訂閱 Topic 才能獲取元數據或進行 assign
-        # 為了精確控制，我們使用 assign 而不是 subscribe，這樣可以立即進行 seek
-        partition = TopicPartition(self.topic, 0) # 假設 Tick 數據在 Partition 0
-        
-        # 3. 查詢該時間點對應的 Offset (offsets_for_times)
-        # 設定 partition 的 offset 為目標時間戳
-        partition.offset = ts_ms
-        
-        # 返回的是帶有新 offset 的 TopicPartition 列表
-        offsets_found = self.consumer.offsets_for_times([partition], timeout=10.0)
-        
-        target_tp = offsets_found[0]
-        
-        if target_tp.offset == -1:
-             self.logger.warning(f"No offset found for time {start_dt}. Starting from LATEST.")
-             # 如果找不到 (例如時間太新)，這時可能需要 fallback 到 latest
-             # 這裡我們先保持 assign，讓它自然讀取 (視 auto.offset.reset 而定) 或手動處理
-        else:
-            self.logger.info(f"Found offset {target_tp.offset} for partition {target_tp.partition}")
-            # 4. 執行 Seek (定位)
-            self.consumer.assign([target_tp]) # Assign 該分區
-            self.consumer.seek(target_tp)     # 將指針移過去
-            return
+    def close(self):
+        if self.consumer:
+            self.consumer.close()
+            self.logger.info("Kafka Consumer closed.")
 
-        # 如果沒找到特定 offset，也必須 assign 才能開始消費
-        self.consumer.assign([partition])
 
     async def consume_stream(self):
         """
@@ -117,7 +102,93 @@ class GaleKafkaConsumer:
         finally:
             self.close()
 
-    def close(self):
-        if self.consumer:
-            self.consumer.close()
-            self.logger.info("Kafka Consumer closed.")
+
+    # 歷史區間消費模式
+    async def consume_history(self, start_dt: datetime, end_dt: datetime):
+        """
+        歷史回測模式：讀取 [start_dt, end_dt] 區間內的數據。
+        """
+        if not self.consumer: raise RuntimeError("Not connected")
+        
+        start_ts = int(start_dt.timestamp() * 1000)
+        end_ts = int(end_dt.timestamp() * 1000)
+        
+        self.logger.info(f"📜 History Mode: {start_dt} ~ {end_dt}")
+
+        # 1. 準備 Partitions
+        partitions = [TopicPartition(t, 0) for t in self.topics]
+        
+        # 2. 查找起點
+        for p in partitions: p.offset = start_ts
+        start_offsets = self.consumer.offsets_for_times(partitions)
+        
+        # 3. 查找終點
+        for p in partitions: p.offset = end_ts
+        end_offsets = self.consumer.offsets_for_times(partitions)
+        
+        end_offset_map = {}
+        
+        for tp in end_offsets:
+            if tp.offset != -1:
+                # 情況 A: 找到了具體的結束 Offset (代表資料在該時間點之後還有更多)
+                end_offset_map[tp.topic] = tp.offset
+            else:
+                # 情況 B: 沒找到 (回傳 -1)，代表請求的結束時間比最新的資料還晚
+                # ⚡️ 修正：查詢該 Partition 的 High Watermark (最末端 Offset)
+                try:
+                    # get_watermark_offsets 回傳 (low, high) tuple
+                    _, high_watermark = self.consumer.get_watermark_offsets(tp)
+                    end_offset_map[tp.topic] = high_watermark
+                    self.logger.info(f"Topic {tp.topic} end time > latest data. Set end offset to High Watermark: {high_watermark}")
+                except Exception as e:
+                    self.logger.error(f"Failed to get watermark for {tp.topic}: {e}")
+
+        # 4. 定位到起點 (Seek)
+        to_assign = []
+        for tp in start_offsets:
+            if tp.offset != -1:
+                to_assign.append(tp)
+                target_end = end_offset_map.get(tp.topic, "Unknown")
+                self.logger.info(f"Topic {tp.topic} start: {tp.offset} -> end: {target_end}")
+        
+        if not to_assign:
+            self.logger.error("No data found for the start time.")
+            return
+
+        self.consumer.assign(to_assign)
+        for tp in to_assign:
+            self.consumer.seek(tp)
+
+        # 5. 全速讀取迴圈
+        loop = asyncio.get_running_loop()
+        BATCH_SIZE = 2000
+        
+        # 確保 active_topics 是基於起點存在的 Topic，且我們知道終點在哪
+        active_topics = set([tp.topic for tp in to_assign if tp.topic in end_offset_map])
+        
+        try:
+            while active_topics:
+                msgs = await loop.run_in_executor(None, self.consumer.consume, BATCH_SIZE, 0.1)
+                
+                if not msgs:
+                    # 防止無窮迴圈：如果 active_topics 還有，但一直讀不到資料 (可能剛好卡在邊界)
+                    # 可以在這裡加入超時判斷，或者簡單地讓它繼續嘗試 (視 Kafka 穩定性而定)
+                    continue
+
+                for msg in msgs:
+                    if msg.error(): continue
+                    
+                    topic = msg.topic()
+                    offset = msg.offset()
+                    
+                    # 檢查是否達到終點
+                    if topic in end_offset_map and offset >= end_offset_map[topic]:
+                        if topic in active_topics:
+                            active_topics.remove(topic)
+                            self.logger.info(f"🏁 Topic {topic} reached end offset {offset}.")
+                        continue 
+                    
+                    yield msg
+
+        finally:
+            self.close()

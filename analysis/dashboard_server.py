@@ -50,37 +50,41 @@ def start_dashboard_server(indicator_manager, port=8050):
         if not ctx.triggered:
             raise PreventUpdate
             
-        # 判斷觸發源是主圖 (price) 還是副圖 (momentum)
         trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
         relayoutData = price_relayout if trigger_id == 'price-chart' else mom_relayout
         
-        if relayoutData:
-            # ---------------------------------------------------------
-            # 情境 A: 手動縮放/拖曳 (Manual Zoom/Pan)
-            # ---------------------------------------------------------
-            # Plotly 傳回明確的 range 數值，代表使用者想鎖定這個視野
-            if 'xaxis.range[0]' in relayoutData and 'xaxis.range[1]' in relayoutData:
-                new_x_range = [relayoutData['xaxis.range[0]'], relayoutData['xaxis.range[1]']]
-                
-                # 目前 Y 軸設為自動 (None)，若未來想記憶 Y 軸可在此擴充
-                return new_x_range, None
-
-            # ---------------------------------------------------------
-            # 情境 B: 重置訊號 (Reset / Double Click)
-            # ---------------------------------------------------------
-            # 偵測到以下 Key 代表使用者想回到「預設視野」:
-            # - autosize: 點擊工具列 "Reset axes" (房子圖示)
-            # - xaxis.autorange: 點擊圖表兩下
-            is_reset = (
-                'xaxis.autorange' in relayoutData or 
-                'yaxis.autorange' in relayoutData or 
-                'autosize' in relayoutData
-            )
+        if not relayoutData:
+            raise PreventUpdate
             
-            if is_reset:
-                # 🚀 關鍵：回傳 None，通知 update_dashboard 進入「強制重置」模式
-                return None, None
+        # 🐞 Debug: 如果還是不動，您可以取消註解這行看終端機印出什麼
+        # print(f"🔍 Relayout Data: {relayoutData}")
 
+        # --- 1. 處理重置 (Autorange / Reset) ---
+        if 'xaxis.autorange' in relayoutData or 'yaxis.autorange' in relayoutData or 'autosize' in relayoutData:
+            return None, None
+
+        # --- 2. 處理 X 軸縮放 (支援多種格式) ---
+        x_min, x_max = None, None
+
+        # 格式 A: xaxis.range[0] (最常見)
+        if 'xaxis.range[0]' in relayoutData and 'xaxis.range[1]' in relayoutData:
+            x_min = relayoutData['xaxis.range[0]']
+            x_max = relayoutData['xaxis.range[1]']
+            
+        # 格式 B: xaxis.range (陣列格式)
+        elif 'xaxis.range' in relayoutData:
+            x_min = relayoutData['xaxis.range'][0]
+            x_max = relayoutData['xaxis.range'][1]
+            
+        # 格式 C: 透過形狀拖曳 (Drag Shapes) - 較少見但防呆
+        # (略，通常上面兩種就夠了)
+
+        # 只有當我們成功解析出 X 軸範圍時，才更新 Store
+        if x_min is not None and x_max is not None:
+            # 回傳 [x_min, x_max], None (我們不鎖定 Y 軸，讓它自動適應)
+            return [x_min, x_max], None 
+            
+        # 如果只是滑鼠移動或其他無關事件，不觸發更新
         raise PreventUpdate
 
     # =========================================================================

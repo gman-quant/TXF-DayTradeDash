@@ -342,11 +342,11 @@ def build_momentum_figure(data, xaxis_range, uirevision='constant'):
             
             # 🔥 警示色：亮紅 (Buy) vs 亮青 (Sell)
             # 這種單出現是送分題，必須最顯眼
-            cols = np.where(y_data >= 0, "#FF0000", "#00FFFF")
+            cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF")
 
             fig.add_trace(go.Bar(
                 x=data['tick_x'], y=y_data,
-                name=f"{ind_id} (>= 20)",
+                name=f"{ind_id} (>= 15)",
                 marker_color=cols,
                 marker_line_width=0, 
                 opacity=1.0, # 完全不透明，覆蓋在最上層

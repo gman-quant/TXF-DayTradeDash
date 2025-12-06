@@ -81,3 +81,39 @@ def get_current_session_offset(
     
     # 5. 處於盤間休息時段
     return current_dt, 'CLOSED'
+
+
+# ------------------------------------------------------------
+# 📜 歷史回測專用的時間範圍計算
+# ------------------------------------------------------------
+def get_history_range(date_str: str, session: str = None) -> Tuple[datetime, datetime]:
+    """
+    根據日期字串和盤別，回傳精確的起訖時間。
+    
+    Args:
+        date_str (str): 'YYYY-MM-DD' (例如 '2025-12-02')
+        session (str): 'day' 或 'night'
+        
+    Returns:
+        (start_dt, end_dt)
+    """
+    target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    
+    if session == 'day':
+        # 日盤：當天 08:45 ~ 13:45
+        start_dt = datetime.combine(target_date, DAY_SESSION_START) 
+        end_dt = datetime.combine(target_date, DAY_SESSION_END)
+        
+    elif session == 'night':
+        # 夜盤：前一天 15:00 ~ 當天 05:00
+        previous_day = target_date - timedelta(days=1)
+        start_dt = datetime.combine(previous_day, NIGHT_SESSION_START)
+        end_dt = datetime.combine(target_date, NIGHT_SESSION_END)
+        
+    else:
+        # 預設全天：前一天 15:00 ~ 當天 13:45
+        previous_day = target_date - timedelta(days=1)
+        start_dt = datetime.combine(previous_day, NIGHT_SESSION_START)
+        end_dt = datetime.combine(target_date, DAY_SESSION_END)
+        
+    return start_dt, end_dt

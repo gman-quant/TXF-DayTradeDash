@@ -160,7 +160,7 @@ INDICATORS_SETUP = [
         'type': TYPE_OSCILLATOR,
         'color': '#00FF00',  # 綠色
         'inputs': ['volume', 'type'], 
-        'args': [300, 5],    # 統計 < 5 的單
+        'args': [250, 5],    # 統計 < 5 的單
         'yaxis': 'y',
         'style': 'bar'
     },
@@ -175,13 +175,13 @@ INDICATORS_SETUP = [
         'type': TYPE_OSCILLATOR,
         'color': '#FFFF00',  # 黃色
         'inputs': ['volume', 'type'], 
-        'args': [300, 5],    # 統計 >= 5 的單
+        'args': [250, 5],    # 統計 >= 5 的單
         'yaxis': 'y',
         'style': 'bar'
     },
 
     # 3. 🔴 巨鱷核彈 (Whale Nuke) - 專門抓那筆 299 口的
-    # 監控 >= 20 口的超大單。
+    # 監控 >= 15 口的超大單。
     # 這種單出現時，通常是日盤的「趨勢發動點」或「停損引爆」。
     # 夜盤可能幾天都看不到一根，但一出來就是送分題。
     {
@@ -190,7 +190,7 @@ INDICATORS_SETUP = [
         'type': TYPE_OSCILLATOR,
         'color': '#FF0000',  # 紅色 (極度顯眼)
         'inputs': ['volume', 'type'], 
-        'args': [300, 20],   # 門檻拉高到 20
+        'args': [250, 15],   # 門檻拉高到 20
         'yaxis': 'y',
         'style': 'bar'
     }
