@@ -245,54 +245,84 @@ def build_combined_figure(data):
                 marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3
             ), row=2, col=1, secondary_y=False)
 
-    # ---------------------------------------------------------
-    # Layout & Axis Sync
-    # ---------------------------------------------------------
+    # =========================================================
+    # 🎨 Global Layout Configuration (全局版面設定)
+    # =========================================================
+    
     initial_range = data.get('default_range')
 
     fig.update_layout(
+        # --- 1. 基礎外觀 (Appearance) ---
         template='plotly_dark',
         margin=dict(l=40, r=40, t=10, b=10),
-        uirevision='constant', 
-        hovermode='x unified',
-        hoverlabel=dict(
-            bgcolor="rgba(0,0,0,0.7)"
-        ),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        paper_bgcolor=UI_COLOR['BG_MAIN'], 
+        paper_bgcolor=UI_COLOR['BG_MAIN'],
         plot_bgcolor=UI_COLOR['BG_MAIN'],
-        barmode='overlay', # 確保 Bar 可重疊
+        
+        # --- 2. 交互行為 (Interaction) ---
+        uirevision='constant',  # 鎖定狀態：防止數據更新時重置縮放
+        hovermode='x',          # 懸停模式
+        
+        # --- 3. 圖例設定 (Legend) ---
+        legend=dict(
+            orientation="h", 
+            yanchor="bottom", y=1.02, 
+            xanchor="center", x=0.5
+        ),
 
-        # --- Y 軸配置 ---
-        yaxis=dict(side='right', showgrid=True, gridcolor='#333', tickformat=',.0f'), # Price
-        yaxis2=dict(side='left', showgrid=True, gridcolor='#333'),                    # Delta Bars
+        # --- 4. 條狀圖設定 (Bar Mode) ---
+        barmode='overlay',      # 關鍵：允許不同 Bar 重疊而非並排擠壓
+
+        # --- 5. Y 軸配置 (Y-Axes Configuration) ---
+        # [Axis 1] 主圖價格 (右軸)
+        yaxis=dict(
+            side='right', 
+            showgrid=True, 
+            gridcolor='#333', 
+            tickformat=',.0f'
+        ), 
+        
+        # [Axis 2] 副圖動能柱狀圖 (左軸)
+        yaxis2=dict(
+            side='left', 
+            showgrid=True, 
+            gridcolor='#333'
+        ),                    
+        
+        # [Axis 3] 副圖 CVD 線圖 (右軸，疊加於 Axis 2)
         yaxis3=dict(
-            side='right', showgrid=False, tickformat=',.0f',
-            zeroline=True, zerolinewidth=1, zerolinecolor='rgba(255,255,255,0.3)',
-            overlaying='y2' # CVD (Overlay on y2)
+            side='right', 
+            showgrid=False, 
+            tickformat=',.0f',
+            zeroline=True, 
+            zerolinewidth=1, 
+            zerolinecolor='rgba(255,255,255,0.3)',
+            overlaying='y2'     # 關鍵：共享副圖空間
         ),
         
-        # --- X 軸配置 ---
-        # 這裡只設定 Range，樣式統一由下方的 update_xaxes 處理
+        # --- 6. X 軸配置 (X-Axis Base) ---
+        # 註：樣式統一由 update_xaxes 處理，此處僅設定範圍與滑桿
         xaxis=dict(
             rangeslider=dict(visible=False),
             range=initial_range if initial_range else None
-        )
+        ),
     )
     
-    # 1. X 軸設定：開啟格線 + 時間標籤 + 十字準星
-    fig.update_xaxes(
-        showgrid=True,
-        showticklabels=True,
-        matches='x',
+    # =========================================================
+    # 📏 Axis Styling & Crosshair (軸線樣式與十字準星)
+    # =========================================================
     
-        # 十字準星 (垂直線)
+    fig.update_xaxes(
+        # 1. 網格與標籤
+        showgrid=True,
+        showticklabels=True,  # 強制主副圖皆顯示時間
+        matches='x',          # 確保上下圖縮放同步
+    
+        # 2. 十字準星 (Spikes)
         showspikes=True,
-        spikethickness=0.5,
-        spikedash='dash',       # 虛線
-        spikecolor=UI_COLOR['TEXT_MAIN'],   # 灰色
-        spikemode='across'      # 橫跨整個圖表
+        spikemode='across',       # 橫跨模式：貫穿整個繪圖區
+        spikethickness=0.5,       # 線條粗細
+        spikedash='dash',         # 線條樣式：虛線
+        spikecolor=UI_COLOR['TEXT_MAIN'], 
     )
     
     return fig
-
