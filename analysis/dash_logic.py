@@ -184,12 +184,23 @@ def build_combined_figure(data):
         ), row=1, col=1)
 
     # 疊加指標 (Overlays: EMA, VWAP...)
+    # 預設關閉 (圖例由灰色變成彩色，點了才顯示線)
+    DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60']
+
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
             y_data = data['history'][ind['id']][data['start_idx']::data['step']]
+
+            # 線圖的可見狀態 (True=顯示, False=隱藏, 'legendonly'=只顯圖例點擊才開)
+            if ind['id'] in DEFAULT_OFF_LEGENDS:
+                vis_state = 'legendonly'
+            else:
+                vis_state = True # 預設顯示
+
             fig.add_trace(go.Scattergl(
                 x=data['tick_x'], y=y_data, mode='lines', name=ind['id'],
-                line=dict(color=ind['color'], width=1, dash=ind.get('style', 'solid'))
+                line=dict(color=ind['color'], width=1, dash=ind.get('style', 'solid')),
+                visible=vis_state
             ), row=1, col=1)
 
     # ---------------------------------------------------------

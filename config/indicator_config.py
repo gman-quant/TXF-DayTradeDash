@@ -60,22 +60,22 @@ INDICATORS_SETUP = [
     },
     # --- 技術指標 ---
     {
-        'id': 'Max_180',
+        'id': 'Max_250',
         'func': 'calc_rolling_max',
-        'args': [180],                  # 過去 60 筆
+        'args': [250],                  # 過去 60 筆
         'type': TYPE_OVERLAY,          # 疊加在主圖
         'inputs': ['close'],           # 只需要收盤價
         'color': '#00FF00',            # 綠色 (壓力線)
-        'style': 'dot'
+        'style': 'dash'
     },
     {
-        'id': 'Min_180',
+        'id': 'Min_250',
         'func': 'calc_rolling_min',
-        'args': [180],                  # 過去 60 筆
+        'args': [250],                  # 過去 60 筆
         'type': TYPE_OVERLAY,
         'inputs': ['close'],
         'color': '#FF0000',            # 紅色 (支撐線)
-        'style': 'dot'
+        'style': 'dash'
     },
     # --- 移動平均線 (SMA) ---
     {
@@ -139,17 +139,17 @@ INDICATORS_SETUP = [
         'yaxis': 'y2'       # 🆕 新增：指定使用右側 Y 軸
     },
     
-    # 2. 短線 Delta (數值小 -> 用預設左軸)
-    {
-        'id': 'RCVD_180',
-        'func': 'calc_period_delta',
-        'args': [180],
-        'type': TYPE_OSCILLATOR,
-        'inputs': ['cum_buy_vol', 'cum_sell_vol'],
-        'color': 'dynamic',
-        'style': 'bar'
-        # 沒寫 yaxis 預設就是 y1 (左軸)
-    },
+    # # 2. 短線 Delta (數值小 -> 用預設左軸)
+    # {
+    #     'id': 'RCVD_180',
+    #     'func': 'calc_period_delta',
+    #     'args': [180],
+    #     'type': TYPE_OSCILLATOR,
+    #     'inputs': ['cum_buy_vol', 'cum_sell_vol'],
+    #     'color': 'dynamic',
+    #     'style': 'bar'
+    #     # 沒寫 yaxis 預設就是 y1 (左軸)
+    # },
     
     # 1. 🟢 螞蟻搬象 (Retail Flow)
     # 監控 1~4 口的散戶動向。

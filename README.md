@@ -88,7 +88,7 @@ python -m core.core_processor
 指定日期，全速回放當天數據以驗證邏輯。
 
 ```bash
-python -m core.core_processor --mode history --date 2025-12-02  --session day
+python -m core.core_processor --mode history --date 2025-12-01  --session day
 ```
 
 *加上 `--session night` 可回測夜盤。*
