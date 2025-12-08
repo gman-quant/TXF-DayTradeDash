@@ -83,7 +83,7 @@ INDICATORS_SETUP = [
         'func': 'calc_sma',           
         'args': [60],                 
         'type': TYPE_OVERLAY,        
-        'inputs': ['close'], 
+        'inputs': ['cum_close'], 
         'color': "#FFF000",           
         'style': 'solid'               
     },
@@ -92,7 +92,7 @@ INDICATORS_SETUP = [
         'func': 'calc_sma_time',
         'args': [3 * 60000], # 3 分鐘 (毫秒)
         'type': TYPE_OVERLAY,
-        'inputs': ['close', 'timestamp'],
+        'inputs': ['cum_close', 'timestamp'],
         'color': "#E0930F",
         'style': 'solid'
     },
