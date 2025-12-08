@@ -4,19 +4,40 @@
 TYPE_OVERLAY = 'overlay'       # 疊加在主圖 (如 SMA, VWAP)
 TYPE_OSCILLATOR = 'oscillator' # 獨立副圖 (如 Momentum, RSI, Volume)
 
+"""
+INDICATOR SCHEMA DEFINITION
+---------------------------
+Each indicator entry in `INDICATORS_SETUP` is a dictionary:
+
+- id (str): Unique identifier for the indicator. Used as key in history buffers.
+- func (str): Name of the function in `core/numba_engine.py` to execute.
+- args (List): Fixed arguments passed to the function (e.g., [period, threshold]).
+- type (str): `TYPE_OVERLAY` (Main Chart) or `TYPE_OSCILLATOR` (Sub Chart) or 'hidden'.
+- inputs (List[str]): List of data arrays from RingBuffer to pass as arguments.
+    - Options: ['close', 'volume', 'type', 'timestamp', 'cum_close', etc...]
+- color (str): Hex color code (e.g., "#FF0000") or 'dynamic'.
+- style (str): 'solid', 'dash', 'bar', etc.
+- yaxis (str, optional): 'y' (Left Axis) or 'y2' (Right Axis, for oscillators).
+"""
+
 # 指標配置清單
 # 系統會自動讀取此清單，並去 core/numba_engine.py 找對應的函數執行
 INDICATORS_SETUP = [
-    # --- 價格主圖指標 (Main Chart) ---
-    # 當盤 VWAP (Session VWAP)
+    # ==========================================
+    # 📈 Main Chart Indicators (Overlay)
+    # ------------------------------------------
+    # Price, VWAP, Bands, SMA, etc.
+    # ==========================================
+    
+    # 1. Underlying Price (Base)
     {
         'id': 'Underlying_Price',
-        'func': 'get_current_value',   # 對應新的 Numba 函數
-        'args': [0],                   # 參數給 0 即可 (不需要 period)
-        'type': TYPE_OVERLAY,          # 畫在主圖
-        'inputs': ['underlying_price'], # ⚠️ 需要這兩個累積陣列
-        'color': "#7F4A98",            # 棕色
-        'style': 'solid'               # 實線 (區別於 50MA 的虛線)
+        'func': 'get_current_value',    # 對應新的 Numba 函數
+        'args': [0],                    # 參數給 0 即可 (不需要 period)
+        'type': TYPE_OVERLAY,           # 畫在主圖
+        'inputs': ['underlying_price'], # ⚠️ 需要這個累積陣列
+        'color': "#7F4A98",             # 棕色
+        'style': 'solid'                # 實線 (區別於 50MA 的虛線)
     },
     # 當盤最高價
     {
@@ -48,12 +69,74 @@ INDICATORS_SETUP = [
         'color': "#780000",         
         'style': 'solid'
     },
-    # 總成交量 (Hidden 指標，只為了 Dashboard 顯示數值用)
+    
+    # 3. Volatility Indicators (Bollinger / STD)
+    {
+        'id': 'SMA_20',
+        'func': 'calc_sma',
+        'args': [20],
+        'type': TYPE_OVERLAY,
+        'inputs': ['cum_close'],
+        'color': "#FFA500", # Orange
+        'style': 'solid'
+    },
+    {
+        'id': 'Boll_Upper',
+        'func': 'calc_bollinger_band',
+        'args': [20, 2.0, 1], # Period=20, Std=2.0, Direction=1 (Upper)
+        'type': TYPE_OVERLAY,
+        'inputs': ['close', 'cum_close'],
+        'color': '#00FF00', # Green
+        'style': 'dash'
+    },
+    {
+        'id': 'Boll_Lower',
+        'func': 'calc_bollinger_band',
+        'args': [20, 2.0, -1], # Period=20, Std=2.0, Direction=-1 (Lower)
+        'type': TYPE_OVERLAY,
+        'inputs': ['close', 'cum_close'],
+        'color': '#FF0000', # Red
+        'style': 'dash'
+    },
+    {
+        'id': 'STD_20',
+        'func': 'calc_std_dev',
+        'args': [20],
+        'type': 'hidden', 
+        'inputs': ['close', 'cum_close'],
+        'color': '#FFFFFF',
+        'style': 'solid'
+    },
+    # Bollinger Upper = SMA + 2*STD
+    # 由於我們沒有直接的 "Combine" 函數，這裡我們暫時只畫出 SMA
+    # 若要畫通道，需要在 numba_engine 加 calc_bollinger_upper
+    # 其實最簡單的作法是：Dashboard 直接訂閱 STD 和 SMA，自己在前端畫 Area
+    # 或者我們在 Numba 寫 calc_bollinger_upper
+    # 這裡先註冊 Z-Score (Mean Reversion)
+    
+    # 4. Z-Score (Mean Reversion Signal)
+    {
+        'id': 'Z_Score_60',
+        'func': 'calc_zscore',
+        'args': [60],
+        'type': TYPE_OSCILLATOR, # 加到副圖觀察
+        'inputs': ['close', 'cum_close'],
+        'color': '#BBBBBB', # 灰色
+        'style': 'solid',
+        'yaxis': 'y2' # 用右軸，因為數值在 -3 ~ +3 之間
+    },
+    # ==========================================
+    # 👻 Hidden Indicators (Computation Only)
+    # ------------------------------------------
+    # Metrics needed for dashboard text but not plotted.
+    # ==========================================
+
+    # 總成交量
     {
         'id': 'Total_Vol',
         'func': 'get_current_value',
         'args': [0],
-        'type': 'hidden',          # 標記為 hidden (稍後 Dashboard 會過濾掉不畫)
+        'type': 'hidden',            # 標記為 hidden (稍後 Dashboard 會過濾掉不畫)
         'inputs': ['total_volume'],  # 對應 RingBuffer 的累積量
         'color': '#FFFFFF',
         'style': 'solid'
@@ -62,19 +145,19 @@ INDICATORS_SETUP = [
     {
         'id': 'Max_250',
         'func': 'calc_rolling_max',
-        'args': [250],                  # 過去 60 筆
-        'type': TYPE_OVERLAY,          # 疊加在主圖
-        'inputs': ['close'],           # 只需要收盤價
-        'color': '#00FF00',            # 綠色 (壓力線)
+        'args': [250],               # 過去 250 筆
+        'type': TYPE_OVERLAY,        # 疊加在主圖
+        'inputs': ['close'],         # 只需要收盤價
+        'color': '#00FF00',          # 綠色 (壓力線)
         'style': 'dash'
     },
     {
         'id': 'Min_250',
         'func': 'calc_rolling_min',
-        'args': [250],                  # 過去 60 筆
+        'args': [250],     
         'type': TYPE_OVERLAY,
         'inputs': ['close'],
-        'color': '#FF0000',            # 紅色 (支撐線)
+        'color': '#FF0000',          # 紅色 (支撐線)
         'style': 'dash'
     },
     # --- 移動平均線 (SMA) ---
@@ -97,35 +180,14 @@ INDICATORS_SETUP = [
         'style': 'solid'
     },
     
-    # {
-    #     'id': 'Max_5m',
-    #     'func': 'calc_rolling_max_time',
-    #     'args': [10 * 60000],                  # 5 分鐘 = 300,000 毫秒
-    #     'type': TYPE_OVERLAY,
-    #     'inputs': ['close', 'timestamp'],   # 🆕 需要 close 和 timestamp 兩個陣列
-    #     'color': '#8000FF',                 # 紫色 (與 Tick-Based 區分)
-    #     'style': 'dash'
-    # },
-    # {
-    #     'id': 'Min_5m',
-    #     'func': 'calc_rolling_min_time',
-    #     'args': [10 * 60000],                  # 5 分鐘 = 300,000 毫秒
-    #     'type': TYPE_OVERLAY,
-    #     'inputs': ['close', 'timestamp'],   # 🆕 需要 close 和 timestamp 兩個陣列
-    #     'color': '#FF8000',                 # 橘色 (與 Tick-Based 區分)
-    #     'style': 'dash'
-    # },
+    # ==========================================
+    # 📉 Sub Chart Indicators (Oscillator)
+    # ------------------------------------------
+    # Volume, CVD, Delta, Momentum
+    # ==========================================
 
-    # --- 副圖指標 (Sub Chart) ---
-    # {
-    #     'id': 'Mom_180ticks',
-    #     'func': 'calc_price_change',
-    #     'args': [180],
-    #     'type': TYPE_OSCILLATOR,
-    #     'inputs': ['close'],
-    #     'color': 'dynamic', # 特殊標記：代表紅綠變色
-    #     'style': 'bar'
-    # },
+    # 1. Session CVD (Accumulated Volume Delta)
+
 
     # 1. 當盤 CVD (數值大 -> 用右軸 y2)
     {
@@ -190,7 +252,7 @@ INDICATORS_SETUP = [
         'type': TYPE_OSCILLATOR,
         'color': '#FF0000',  # 紅色 (極度顯眼)
         'inputs': ['volume', 'type'], 
-        'args': [250, 15],   # 門檻拉高到 20
+        'args': [250, 15],   # 門檻拉高到 15
         'yaxis': 'y',
         'style': 'bar'
     }

@@ -3,9 +3,15 @@
 import asyncio
 import logging
 import sys
-import threading
-import argparse # 🆕 新增：用於解析命令列參數
+import argparse
+import time
+import multiprocessing
+import signal
+import os
 from datetime import datetime
+
+# 0. 解決 PYTHONPATH 問題 (確保可以 Import Project Root)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 嘗試引入 uvloop 加速 asyncio
 try:
@@ -15,7 +21,6 @@ except ImportError:
     pass
 
 # --- 模組引入 ---
-# 🆕 新增 get_history_range
 from config.txf_calendar import get_current_session_offset, get_history_range
 from ingestion.kafka_consumer import GaleKafkaConsumer
 from data_schemas.txf_data_pb2 import Tick
@@ -24,202 +29,235 @@ from core.indicator_manager import IndicatorManager
 from analysis.dashboard_server import start_dashboard_server
 
 # =========================================================
-# ⚙️ Logging 設定
+# ⚙️ 日誌設定 (Logging Setup)
 # =========================================================
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
+def setup_logger(name):
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(name)s | %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+    return logger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-    stream=sys.stdout
-)
-logger = logging.getLogger("CoreProcessor")
 
+# =========================================================
+# 🏭 寫入進程 (Ingestion / Writer)
+# =========================================================
+def run_ingestion_process(args):
+    """
+    [Writer Process]
+    負責接收 Kafka 資料，並高效寫入 Shared Memory 環狀緩衝區。
+    """
+    logger = setup_logger("IngestionWorker")
+    logger.info("啟動資料接收進程 (Ingestion Process)...")
 
-class CoreProcessor:
-    def __init__(self, args):
-        """
-        args: argparse 的 Namespace 物件，包含所有啟動設定
-        """
-        self.args = args
-        self.mode = args.mode # 'live' or 'history'
+    # 1. 初始化 RingBuffer (建立共享記憶體)
+    ring_buffer = TxfRingBuffer(capacity=200000, create_shm=True)
+    ring_buffer.clear()
+
+    write_tick = ring_buffer.write_tick
+
+    # 2. 初始化 Kafka Consumer
+    consumer = GaleKafkaConsumer(
+        broker_url=args.broker,
+        group_id=args.group,
+        topics=[args.topic]
+    )
+
+    try:
+        consumer.connect()
+    except Exception as e:
+        logger.error(f"Kafka 連線失敗: {e}")
+        return
+
+    current_tick = Tick()
+    processed_count = 0
+    
+    # 3. 定義非同步消費迴圈
+    async def consume_loop():
+        nonlocal processed_count
+        data_generator = None
         
-        # Kafka 設定
-        self.kafka_broker = args.broker
-        self.group_id = args.group
-        # 注意：Consumer 支援 list topic，這裡先轉成 list
-        self.topics = [args.topic] 
-        
-        # 1. 初始化 Kafka Consumer (尚未連線)
-        self.consumer: GaleKafkaConsumer = None
-        
-        # 2. 初始化 Ring Buffer (容量 200,000)
-        self.ring_buffer = TxfRingBuffer(capacity=200000)
-        
-        # ⚡️ 安全性優化：強制清空記憶體
-        self.ring_buffer.clear()
+        # 模式判定
+        if args.mode == 'live':
+            # 實盤模式：定位到當前開盤位置
+            start_offset, session_status = get_current_session_offset()
+            if session_status == 'CLOSED':
+                logger.warning("目前市場已收盤")
+                # return # 視需求決定是否退出
 
-        # 3. 初始化 Indicator Manager
-        self.indicator_manager = IndicatorManager(buffer_capacity=200000)
+            try:
+                consumer.seek_to_time(start_offset)
+                logger.info(f"Seek 至開盤時間戳: {start_offset}")
+            except Exception as e:
+                logger.error(f"Seek 失敗: {e}")
+                
+            data_generator = consumer.consume_stream()
+            
+        elif args.mode == 'history':
+            # 回測模式：讀取指定日期區間
+            start_dt, end_dt = get_history_range(args.date, args.session)
+            logger.info(f"回測區間: {start_dt} ~ {end_dt}")
+            data_generator = consumer.consume_history(start_dt, end_dt)
+
+        if not data_generator:
+            return
+
+        # --- 資料處理迴圈 ---
+        async for raw_msg_obj in data_generator:
+            raw_msg_bytes = raw_msg_obj.value() if hasattr(raw_msg_obj, 'value') else raw_msg_obj
+            
+            if not raw_msg_bytes: continue
+
+            try:
+                current_tick.ParseFromString(raw_msg_bytes)
+                write_tick(current_tick) # O(1) 寫入共享記憶體
+                
+                processed_count += 1
+                if processed_count % 5000 == 0:
+                     logger.info(f"已處理 {processed_count} 筆 Tick. 最新價: {current_tick.close/10000.0}")
+                    
+            except Exception as e:
+                logger.error(f"Protobuf 解析錯誤: {e}")
+                continue
+
+        # 回測結束後保持 Process 存活，避免 SHM 被回收
+        if args.mode == 'history':
+            logger.info("歷史資料回放完成，進入待機模式。")
+            while True:
+                await asyncio.sleep(1)
+
+    try:
+        asyncio.run(consume_loop())
+    except KeyboardInterrupt:
+        logger.info("接收進程中斷。")
+    finally:
+        consumer.close()
+        # 注意：Writer 不主動 unlink shared memory，以免影響 Reader
+
+# =========================================================
+# 🧠 策略與介面進程 (Strategy & UI / Reader)
+# =========================================================
+def run_strategy_process(args):
+    """
+    [Reader Process]
+    從 Shared Memory 讀取最新數據，計算指標，並驅動 Dashboard 更新。
+    """
+    logger = setup_logger("StrategyWorker")
+    logger.info("啟動策略與 UI 進程...")
+    
+    # 稍作等待確保 Writer 已建立 SHM
+    time.sleep(1) 
+    
+    try:
+        # 1. 連接 RingBuffer (Attach 模式)
+        ring_buffer = TxfRingBuffer(capacity=200000, create_shm=False)
+        get_snapshot = ring_buffer.get_snapshot
         
-        # 狀態標記
-        self.is_running = False
+        # 2. 初始化指標管理器
+        indicator_manager = IndicatorManager(buffer_capacity=200000)
 
-    async def initialize_consumer(self):
-        """初始化並連線 Consumer"""
-        self.consumer = GaleKafkaConsumer(
-            broker_url=self.kafka_broker,
-            group_id=self.group_id,
-            topics=self.topics
-        )
-        self.consumer.connect()
-
-    async def run(self):
-        """
-        核心運轉迴圈 (The Reactor Loop)
-        """
-        # 1. 建立連線
-        await self.initialize_consumer()
-        self.is_running = True
-
-        # 2. 啟動 Dashboard
-        logger.info("Starting Dashboard Server on port 8050...")
+        # 3. 啟動 Dashboard 伺服器 (Thread)
+        import threading
         dash_thread = threading.Thread(
             target=start_dashboard_server, 
-            args=(self.indicator_manager, 8050),
+            args=(indicator_manager, 8050),
             daemon=True
         )
         dash_thread.start()
+        logger.info("Dashboard 伺服器已啟動在此 Process 中。")
+
+        # 4. 主迴圈 (極速同步)
+        local_head = -1
+        sync_count = 0
         
-        logger.info(f"🚀 Engine Started | Mode: {self.mode.upper()}")
-
-        # 3. 準備變數與方法綁定 (Pre-binding)
-        current_tick = Tick()
-        write_tick = self.ring_buffer.write_tick
-        get_snapshot = self.ring_buffer.get_snapshot
-        calc_indicators = self.indicator_manager.on_tick
-        processed_count = 0
-        
-        # ==========================================
-        # 🔀 核心分流：決定數據生成器 (Data Generator)
-        # ==========================================
-        data_generator = None
-        
-        if self.mode == 'live':
-            # --- A. 實時模式 ---
-            start_offset, session_status = get_current_session_offset()
-            logger.info(f"Session Check: Status={session_status}, StartOffset={start_offset}")
-
-            if session_status == 'CLOSED':
-                logger.warning("Market is currently CLOSED. (Live Mode)")
-                # 在實盤中，這裡可能選擇等待，但在測試時直接 return
-                # return 
-
-            # 定位到開盤時間
-            try:
-                self.consumer.seek_to_time(start_offset)
-            except Exception as e:
-                logger.error(f"Failed to seek: {e}")
-                return
-
-            # 獲取無限串流生成器
-            data_generator = self.consumer.consume_stream()
-
-        elif self.mode == 'history':
-            # --- B. 歷史模式 ---
-            target_date = self.args.date
-            session_type = self.args.session # 'day' or 'night'
+        while True:
+            # 獲取当前 Writer 的寫入位置
+            target_head = ring_buffer.head
             
-            # 計算該日期的起訖時間
-            start_dt, end_dt = get_history_range(target_date, session_type)
-            logger.info(f"📜 History Range: {start_dt} ~ {end_dt}")
-            
-            # 獲取有限區間生成器
-            data_generator = self.consumer.consume_history(start_dt, end_dt)
-
-        # ==========================================
-        # 🔄 統一消費迴圈 (Universal Loop)
-        # ==========================================
-        try:
-            if data_generator:
-                async for raw_msg_obj in data_generator:
-                    # 注意：我們修改了 Consumer 讓它回傳 Message 物件以便檢查 Topic
-                    # 如果您的 Consumer 還是只回傳 value bytes，請改回 raw_msg_bytes
+            # 若有新資料
+            if target_head != local_head:
+                try:
+                    # 同步資料區塊到本地指標管理器
+                    indicator_manager.sync_from_buffer(ring_buffer, local_head, target_head)
+                    local_head = target_head
                     
-                    # 這裡假設 consume_history/stream 回傳的是 Message 物件
-                    # 如果您還沒改 Consumer，這裡可能是 bytes，請根據您的 Consumer 實作調整
-                    
-                    # 為了相容您目前的 consumer 寫法 (只 yield value):
-                    raw_msg_bytes = raw_msg_obj.value() if hasattr(raw_msg_obj, 'value') else raw_msg_obj
-                    
-                    if not raw_msg_bytes:
-                        continue
+                    sync_count += 1
+                    if sync_count % 5000 == 0:
+                        # 簡單監控
+                        pass
+                        
+                except Exception as e:
+                    logger.error(f"指標計算錯誤: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-                    # 1. 反序列化
-                    try:
-                        current_tick.ParseFromString(raw_msg_bytes)
-                    except Exception as e:
-                        logger.error(f"Protobuf Error: {e}")
-                        continue
+            # 短暫休眠讓出 CPU (頻率可調)
+            time.sleep(0.001) 
 
-                    # 2. 寫入與計算
-                    write_tick(current_tick)
-                    calc_indicators(get_snapshot())
-                    
-                    # 3. Log 心跳
-                    processed_count += 1
-                    if processed_count % 5000 == 0:
-                        logger.info(
-                            f"Tick#{processed_count} | "
-                            f"Price: {current_tick.close/10000.0:.0f} | "
-                            f"TotalVol: {current_tick.total_volume}"
-                        )
-            else:
-                logger.error("Failed to initialize data generator.")
+    except FileNotFoundError:
+        logger.error("找不到 Shared Memory 文件，請先啟動 Writer (Ingestion Process)。")
+    except KeyboardInterrupt:
+        logger.info("策略進程中斷。")
+    except Exception as e:
+        logger.error(f"策略進程發生未知錯誤: {e}")
 
-            # ==========================================
-            # ⬇️ 🆕 關鍵修正：歷史模式跑完後，進入掛機等待
-            # ==========================================
-            if self.mode == 'history':
-                logger.info("🎉 Backtest Replay Finished! (Data stream ended)")
-                logger.info("📊 Dashboard is still running at http://localhost:8050")
-                logger.info("🛑 Press CTRL+C to exit.")
-                # 讓主程式進入無限睡眠，保活 Dashboard Thread
-                while True:
-                    await asyncio.sleep(1)
-
-        except asyncio.CancelledError:
-            logger.info("Task cancelled.")
-        finally:
-            if self.consumer:
-                self.consumer.close()
-            logger.info("Stopped.")
-
-# -------------------------------------------------------
-# 🚀 升級版入口點 (支援參數)
-# -------------------------------------------------------
+# =========================================================
+# 🚀 主程式入口 (Main Entry)
+# =========================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="TXF Gale Quant Engine")
+    # 解析命令列參數
+    parser = argparse.ArgumentParser(description="TXF Gale Engine v2.0 (High Performance)")
     
-    # 參數定義
-    parser.add_argument('--mode', type=str, default='live', choices=['live', 'history'], help='Running mode')
-    parser.add_argument('--date', type=str, help='Target date (YYYY-MM-DD) for history mode')
-    parser.add_argument('--session', type=str, default='whole', choices=['day', 'night'], help='Trading session')
-    parser.add_argument('--broker', type=str, default='192.168.1.50:9092', help='Kafka Broker IP:Port')
-    parser.add_argument('--group', type=str, default='gale_core_v1', help='Kafka Group ID')
-    parser.add_argument('--topic', type=str, default='txf-tick', help='Kafka Topic Name')
+    # 必要參數 (現在預設為 live)
+    parser.add_argument('--mode', choices=['live', 'history'], default='live', help="運行模式: live (實盤) 或 history (回測)")
+    
+    # Kafka 設定
+    parser.add_argument('--broker', default='192.168.1.50:9092', help="Kafka Broker 地址")
+    parser.add_argument('--topic', default='txf-tick', help="Kafka Topic 名稱")
+    parser.add_argument('--group', default='gale_engine_v1', help="Consumer Group ID")
+    
+    # 回測參數
+    parser.add_argument('--date', help="回測日期 (YYYY-MM-DD)")
+    parser.add_argument('--session', default='regular', choices=['regular', 'afterhours', 'full'], help="回測時段")
 
     args = parser.parse_args()
 
-    # 參數檢查
-    if args.mode == 'history' and not args.date:
-        print("❌ Error: History mode requires --date argument (e.g., --date 2025-12-01)")
-        sys.exit(1)
+    # 優雅關閉信號處理
+    def signal_handler(sig, frame):
+        print("\n[系統] 接收到關閉信號，正在停止所有 Process...")
+        sys.exit(0)
 
-    # 初始化並執行
-    processor = CoreProcessor(args)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    print("=========================================")
+    print("   🌪️  TXF GALE ENGINE v2.0 LAUNCHING   ")
+    print("=========================================")
+
+    # 啟動多進程架構 (Writer + Reader)
+    # 必須使用 'spawn' 模式 (macOS 預設但明確指定較好)
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
+
+    p_writer = multiprocessing.Process(target=run_ingestion_process, args=(args,))
+    p_reader = multiprocessing.Process(target=run_strategy_process, args=(args,))
+    
+    p_writer.start()
+    p_reader.start()
     
     try:
-        asyncio.run(processor.run())
+        p_writer.join()
+        p_reader.join()
     except KeyboardInterrupt:
-        pass
+        print("\n🛑 Shutting down...")
+        p_writer.terminate()
+        p_reader.terminate()
+        p_writer.join()
+        p_reader.join()
+        print("Done.")

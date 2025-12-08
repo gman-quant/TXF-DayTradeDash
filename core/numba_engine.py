@@ -10,13 +10,22 @@ from numba import jit
 # nogil=True:    釋放 GIL，允許並行執行 (如果有多核心需求)
 # -----------------------------------------------------------------------------
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def get_current_value(data_array: np.ndarray, 
                       head: int, 
-                      period: int, # 這個參數沒用到，只是為了符合介面規範
+                      period: int, # Unused, kept for interface consistency
                       capacity: int) -> float:
     """
-    直接讀取當前指標值 (用於已在 RingBuffer 預計算好的數據)
+    Retrieves the value at the current head pointer (latest written data).
+    
+    Args:
+        data_array: The 1D data array (e.g., close, volume).
+        head: Current write cursor position.
+        period: (Unused) Kept for interface consistency.
+        capacity: Ring buffer total capacity.
+
+    Returns:
+        float: The latest value, or NaN if the value is 0 (uninitialized).
     """
     curr_idx = head - 1
     if curr_idx < 0: curr_idx += capacity
@@ -28,7 +37,7 @@ def get_current_value(data_array: np.ndarray,
         
     return val
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_session_vwap(cum_pv: np.ndarray, 
                       cum_vol: np.ndarray, 
                       head: int, 
@@ -50,7 +59,7 @@ def calc_session_vwap(cum_pv: np.ndarray,
         
     return current_pv / current_vol
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_price_change(prices: np.ndarray, 
                       head: int, 
                       period: int, 
@@ -75,14 +84,25 @@ def calc_price_change(prices: np.ndarray,
 
     return curr_price - prev_price
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_sma(cum_close: np.ndarray, 
              head: int, 
              period: int, 
              capacity: int) -> float:
     """
-    計算簡單移動平均 (SMA) - O(1) Optimized
-    利用累積收盤價 (Prefix Sum) 計算，取代迴圈。
+    Calculates Simple Moving Average (SMA) using O(1) Prefix Sum.
+    
+    Algorithm:
+        SMA = (CumClose[Now] - CumClose[Now - N]) / N
+
+    Args:
+        cum_close: Cumulative sum array of closing prices.
+        head: Current write cursor.
+        period: Window size N.
+        capacity: Ring buffer total capacity.
+
+    Returns:
+        float: The SMA value, or NaN if data is insufficient (startup phase).
     """
     # 當前索引
     curr_idx = head - 1
@@ -92,44 +112,10 @@ def calc_sma(cum_close: np.ndarray,
     prev_idx = head - 1 - period
     if prev_idx < 0: prev_idx += capacity
     
-    # 公式: (累積到現在 - 累積到N筆前) / N
-    # sum_val = P[now] + P[now-1] + ... + P[now-period+1]
-    # PrefixSum[now] = Sum(0...now)
-    # PrefixSum[prev] = Sum(0...now-period)
-    # RangeSum = PrefixSum[now] - PrefixSum[prev]
-    
-    # 注意：這裡假設 cum_close 是持續累加且正確維護的
-    # 如果 head < period (剛啟動資料不足)，理論上 ring buffer 會 wrap around 讀到舊資料 (或是0)
-    # 對於嚴謹的實作，我們可以用 cum_volume 輔助檢查，但這裡求快直接算
-    
-    # 🩹 優化修正: 檢查 prev_idx 是否指到尚未寫入的區域 (Init Zero)
-    # 假設 cum_close[prev_idx] 為 0，代表我們回溯到了尚未有資料的緩衝區
-    # 此時計算出來的 SMA 會是 (Sum / N) 但 Sum 其實只有 partial sum，數值會錯誤(偏小)。
-    # 故回傳 NaN 讓指標暫時無效，直到資料足夠。
     if cum_close[prev_idx] == 0.0:
         return np.nan
 
     sum_val = cum_close[curr_idx] - cum_close[prev_idx]
-    
-    # 修正極端情況：如果 cross boundary 導致數值跳變 (通常在 RingBuffer 不會，因為是持續累加)
-    # 可是 TxfRingBuffer 的 cum_close 是這一輪的累積，還是永續累積？
-    # 查看 ring_buffer.py: self.cum_close[idx] = self.cum_close[prev_idx] + price
-    # 它是一個持續累加值。
-    # 潛在問題：如果累加太久 float64 會失去精度，但在日內交易(Day Trading)幾萬筆內通常沒問題。
-    # 另一個問題：RingBuffer 是環狀的，當 head wrap around 回到 0 時，
-    # 舊的 cum_close 會被覆寫。
-    
-    # ⚠️ 修正邏輯：
-    # RingBuffer 的 cum_close 在 wrap around 時會怎樣？
-    # 它是 "Stateful Update": next = prev + curr
-    # 所以即使繞回 index 0, 它的值還是接續 index MAX 的值繼續加上去。
-    # 所以直接相減是安全的，除非... overflow (但 float64 很大)。
-    
-    # 唯一例外：剛啟動時 (head < period)，prev_idx 會指到 array 尾端
-    # 而 array 尾端可能是 0 (還沒寫到)。
-    # 這時減出來會是 sum_val = cum_close[curr] - 0 = cum_close[curr] (從開頭到現在的總合)
-    # 這其實就是 SMA (只是分母應該是 head 而不是 period)。
-    # 為了保持簡單與一致性，我們接受這個短暫的暖機誤差，或者由上層控制 head > period 才呼叫。
     
     if period == 0: return np.nan
     
@@ -137,10 +123,10 @@ def calc_sma(cum_close: np.ndarray,
 
 
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_vwap_time(prices: np.ndarray, 
                    volumes: np.ndarray, 
-                   timestamps: np.ndarray,  # <--- 新增：需要時間陣列
+                   timestamps: np.ndarray,  # <--- 需要時間陣列
                    head: int, 
                    time_window_ms: int,     # <--- 參數變成毫秒數
                    capacity: int) -> float:
@@ -185,7 +171,7 @@ def calc_vwap_time(prices: np.ndarray,
         
     return sum_pv / sum_v
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_sma_time(cum_close: np.ndarray, # ⚠️ 改用累積值
                   timestamps: np.ndarray, 
                   head: int, 
@@ -258,7 +244,7 @@ def calc_sma_time(cum_close: np.ndarray, # ⚠️ 改用累積值
     return total_val / count
 
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_rolling_max(data_array: np.ndarray, 
                      head: int, 
                      period: int, 
@@ -287,7 +273,7 @@ def calc_rolling_max(data_array: np.ndarray,
                 
     return max_val
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_rolling_min(data_array: np.ndarray, 
                      head: int, 
                      period: int, 
@@ -317,7 +303,7 @@ def calc_rolling_min(data_array: np.ndarray,
 
 # core/numba_engine.py (新增在最後面)
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_rolling_max_time(data_array: np.ndarray, 
                           time_array: np.ndarray, # 🆕 需要時間陣列
                           head: int, 
@@ -369,7 +355,7 @@ def calc_rolling_max_time(data_array: np.ndarray,
         
     return max_val
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_rolling_min_time(data_array: np.ndarray, 
                           time_array: np.ndarray, # 🆕 需要時間陣列
                           head: int, 
@@ -418,7 +404,7 @@ def calc_rolling_min_time(data_array: np.ndarray,
         
     return min_val
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_session_cvd(cum_buy: np.ndarray, 
                      cum_sell: np.ndarray, 
                      head: int, 
@@ -434,7 +420,7 @@ def calc_session_cvd(cum_buy: np.ndarray,
     # 直接相減，O(1)
     return float(cum_buy[curr_idx] - cum_sell[curr_idx])
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_period_delta(cum_buy: np.ndarray, 
                       cum_sell: np.ndarray, 
                       head: int, 
@@ -458,7 +444,7 @@ def calc_period_delta(cum_buy: np.ndarray,
     
     return float(window_buy - window_sell)
 
-@jit(nopython=True, cache=True, fastmath=True)
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
 def calc_large_lot_net(vol_arr: np.ndarray, 
                        type_arr: np.ndarray, 
                        head: int, 
@@ -533,3 +519,220 @@ def calc_small_lot_net(vol_arr: np.ndarray,
                 net_small_vol -= v
             
     return net_small_vol
+
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
+def calc_std_dev(data_array: np.ndarray, 
+                 cum_array: np.ndarray, # Kept for signature compatibility but unused
+                 head: int, 
+                 period: int, 
+                 capacity: int) -> float:
+    """
+    Calculates Rolling Standard Deviation using robust O(N) loop to avoid boundary artifacts.
+    """
+    if period <= 0: return np.nan
+    
+    # 1. Calc Mean (Loop)
+    sum_val = 0.0
+    valid = True
+    
+    # First Pass: Sum
+    for i in range(period):
+        idx = head - 1 - i
+        if idx < 0: idx += capacity
+        
+        val = data_array[idx]
+        if val == 0.0:
+            valid = False
+            break
+        sum_val += val
+        
+    if not valid: return np.nan
+    
+    mean = sum_val / period
+    
+    # 2. Calc Variance (Loop)
+    sum_sq_diff = 0.0
+    
+    for i in range(period):
+        idx = head - 1 - i
+        if idx < 0: idx += capacity
+        val = data_array[idx]
+        diff = val - mean
+        sum_sq_diff += diff * diff
+        
+    variance = sum_sq_diff / period
+    return np.sqrt(variance)
+
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
+def calc_zscore(data_array: np.ndarray, 
+                cum_array: np.ndarray, 
+                head: int, 
+                period: int, 
+                capacity: int) -> float:
+    # Use calc_std_dev for robustness
+    std_dev = calc_std_dev(data_array, cum_array, head, period, capacity)
+    
+    if np.isnan(std_dev) or std_dev == 0.0:
+        return np.nan
+        
+    # Get current val
+    curr_idx = head - 1
+    if curr_idx < 0: curr_idx += capacity
+    val = data_array[curr_idx]
+    
+    # Re-calc mean (or return it from std_dev? separate function best, but low overhead to sum again)
+    # Let's just do the loop for mean here too to be safe/consistent
+    sum_val = 0.0
+    for i in range(period):
+        idx = head - 1 - i
+        if idx < 0: idx += capacity
+        sum_val += data_array[idx]
+    mean = sum_val / period
+    
+    return (val - mean) / std_dev
+
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
+def calc_bollinger_band(data_array: np.ndarray, 
+                        cum_array: np.ndarray, 
+                        head: int, 
+                        period: int, 
+                        num_std: float,
+                        direction: int, # 1 for Upper, -1 for Lower
+                        capacity: int) -> float:
+    """
+    Calculates Bollinger Band Value.
+    Band = SMA +/- (num_std * StdDev)
+    """
+    if period <= 0: return np.nan
+    
+    # 1. Calc Mean & Check Validity (O(N))
+    sum_val = 0.0
+    valid = True
+    
+    for i in range(period):
+        idx = head - 1 - i
+        if idx < 0: idx += capacity
+        val = data_array[idx]
+        if val == 0.0:
+            valid = False
+            break
+        sum_val += val
+        
+    if not valid: return np.nan
+    
+    mean = sum_val / period
+    
+    # 2. Calc StdDev (O(N))
+    sum_sq_diff = 0.0
+    for i in range(period):
+        idx = head - 1 - i
+        if idx < 0: idx += capacity
+        diff = data_array[idx] - mean
+        sum_sq_diff += diff * diff
+    
+    std_dev = np.sqrt(sum_sq_diff / period)
+    
+    band = mean + (direction * num_std * std_dev)
+    return band
+    
+    # 2. Calc StdDev (O(N))
+    sum_sq_diff = 0.0
+    valid = True
+    
+    for i in range(period):
+        idx = head - 1 - i
+        if idx < 0: idx += capacity
+        
+        val = data_array[idx]
+        if val == 0.0:
+            valid = False
+            break
+            
+        diff = val - mean
+        sum_sq_diff += diff * diff
+        
+    if not valid:
+        return np.nan
+        
+    variance = sum_sq_diff / period
+    std_dev = np.sqrt(variance)
+    
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
+def update_volume_profile(profile_array: np.ndarray, 
+                          price_array: np.ndarray, 
+                          volume_array: np.ndarray, 
+                          start_idx: int, 
+                          end_idx: int):
+    """
+    Updates the global session volume profile in-place.
+    Uses Direct Array Indexing for O(1) performance.
+    
+    Args:
+        profile_array: Array of size MAX_PRICE (e.g., 50000). Index = Price.
+        price_array: Source price array (Float, will be cast to Int).
+        volume_array: Source volume array.
+    """
+    for i in range(start_idx, end_idx):
+        p = price_array[i]
+        v = volume_array[i]
+        
+        # Cast price to int index
+        # 28300.0 -> 28300
+        # Safety check for bounds and Ignore 0 (initialization noise)
+        idx = int(p)
+        if 0 < idx < len(profile_array):
+            profile_array[idx] += v
+
+@jit(nopython=True, cache=True, fastmath=True, nogil=True)
+def get_profile_stats(profile_array: np.ndarray):
+    """
+    Calculates POC (Point of Control) and VA (Value Area).
+    
+    Returns:
+        (poc_price, vah, val, total_vol)
+    """
+    # 1. Find POC (Max Volume)
+    poc_idx = np.argmax(profile_array)
+    poc_vol = profile_array[poc_idx]
+    
+    if poc_vol == 0:
+        return 0, 0, 0, 0
+        
+    total_vol = np.sum(profile_array)
+    target_vol = total_vol * 0.70 # 70% Value Area
+    
+    # 2. Expand from POC to find VA
+    current_vol = poc_vol
+    upper_idx = poc_idx
+    lower_idx = poc_idx
+    max_idx = len(profile_array) - 1
+    
+    # Greedy expansion
+    while current_vol < target_vol:
+        # Check neighbors
+        can_go_up = (upper_idx < max_idx)
+        can_go_down = (lower_idx > 0)
+        
+        next_up_vol = profile_array[upper_idx + 1] if can_go_up else 0
+        next_down_vol = profile_array[lower_idx - 1] if can_go_down else 0
+        
+        if not can_go_up and not can_go_down:
+            break
+            
+        # Compare and expand towards higher volume
+        if next_up_vol > next_down_vol:
+            upper_idx += 1
+            current_vol += next_up_vol
+        elif next_down_vol > next_up_vol:
+            lower_idx -= 1
+            current_vol += next_down_vol
+        else:
+            # Equal or both zero, expand both if possible (or prioritize one)
+            if can_go_up:
+                upper_idx += 1
+                current_vol += next_up_vol
+            if can_go_down:
+                lower_idx -= 1
+                current_vol += next_down_vol
+                
+    return poc_idx, upper_idx, lower_idx, total_vol

@@ -2,51 +2,79 @@
 
 import numpy as np
 from data_schemas.txf_data_pb2 import Tick
+from core.shared_memory_utils import (
+    SharedBufferWrapper, 
+    calculate_layout, 
+    init_shared_memory
+)
 
 class TxfRingBuffer:
     """
-    TXF 專用的 NumPy 環狀緩衝區 (Structure of Arrays)。
-    
-    核心特性：
-    1. 預先分配記憶體 (Zero Allocation during runtime)。
-    2. O(1) 寫入複雜度。
-    3. 內建累積和 (Prefix Sum) 與狀態追蹤 (Stateful Tracking)。
-    """
-    def __init__(self, capacity: int = 200000):
-        self.capacity = capacity
-        self.head = 0          # 指向「下一個寫入位置」
-        self.is_full = False   # 標記是否已寫滿一輪
-        
-        # ==========================================
-        # 1. 基礎數據欄位 (Raw Data)
-        # ==========================================
-        self.timestamp        = np.zeros(capacity, dtype=np.int64)
-        self.close            = np.zeros(capacity, dtype=np.float64)
-        self.volume           = np.zeros(capacity, dtype=np.int32)
-        self.total_volume     = np.zeros(capacity, dtype=np.int32)
-        self.tick_type        = np.zeros(capacity, dtype=np.int32)
-        self.underlying_price = np.zeros(capacity, dtype=np.float64)
+    Fixed-size Circular Buffer for High-Frequency Tick Data.
+    Uses Structure of Arrays (SoA) layout for CPU cache efficiency and Numba compatibility.
 
-        # ==========================================
-        # 2. 狀態數據 (Stateful Data)
-        # ==========================================
-        self.session_high     = np.zeros(capacity, dtype=np.float64)
-        self.session_low      = np.zeros(capacity, dtype=np.float64)
+    Memory Layout (SoA):
+    --------------------
+    Timestamp: [t0, t1, t2, ..., tN]
+    Close:     [p0, p1, p2, ..., pN]
+    Volume:    [v0, v1, v2, ..., vN]
+               ^
+               |
+             Head (Write Pointer) -->
+
+    Key Features:
+    1. **Zero Allocation**: All arrays pre-allocated. No malloc during runtime.
+    2. **O(1) Write**: Constant time insertion with state updates.
+    3. **Prefix Sums**: Auto-maintains cumulative sums for O(1) SMA/VWAP.
+    """
+
+    def __init__(self, capacity: int = 200000, shm_name: str = 'txf_ring_buffer', create_shm: bool = True):
+        self.capacity = capacity
         
-        # ==========================================
-        # 3. 累積數據 (Cumulative Data for O(1) Calc)
-        # ⚠️ 注意：成交量累積改用 int64 防止溢位
-        # ==========================================
-        self.cum_volume       = np.zeros(capacity, dtype=np.int64)   # 累積成交量 (VWAP分母)
-        self.cum_pv           = np.zeros(capacity, dtype=np.float64) # 累積 PV (VWAP分子)
-        self.cum_close        = np.zeros(capacity, dtype=np.float64) # 累積收盤價 (SMA)
-        self.cum_buy_vol      = np.zeros(capacity, dtype=np.int64)   # 累積外盤量
-        self.cum_sell_vol     = np.zeros(capacity, dtype=np.int64)   # 累積內盤量
+        # Calculate size needed
+        total_size, offsets = calculate_layout()
+        
+        # Initialize Shared Memory
+        self.shm = init_shared_memory(shm_name, create=create_shm, size=total_size)
+        
+        # Wrap with Numpy Arrays
+        self.wrapper = SharedBufferWrapper(self.shm, offsets)
+        
+        # Bind arrays to self for compatibility with existing code
+        self.timestamp        = self.wrapper.views['timestamp']
+        self.close            = self.wrapper.views['close']
+        self.volume           = self.wrapper.views['volume']
+        self.total_volume     = self.wrapper.views['total_volume']
+        self.tick_type        = self.wrapper.views['tick_type']
+        self.underlying_price = self.wrapper.views['underlying_price']
+        
+        self.session_high     = self.wrapper.views['session_high']
+        self.session_low      = self.wrapper.views['session_low']
+        
+        self.cum_volume       = self.wrapper.views['cum_volume']
+        self.cum_pv           = self.wrapper.views['cum_pv']
+        self.cum_close        = self.wrapper.views['cum_close']
+        self.cum_buy_vol      = self.wrapper.views['cum_buy_vol']
+        self.cum_sell_vol     = self.wrapper.views['cum_sell_vol']
+
+        # Sync Header State
+        if create_shm:
+            # Writer Mode: Initialize Header
+            self.head = 0
+            self.is_full = False
+            self.wrapper.set_header(0, False)
+        else:
+            # Reader Mode: Read Header
+            self.head, self.is_full = self.wrapper.get_header()
 
     def write_tick(self, tick: Tick):
         """
-        將單筆 Tick 寫入緩衝區，並同步更新所有狀態與累積欄位。
+        Writes a single Tick into the buffer and updates all stateful/cumulative columns.
+        
         Complexity: O(1)
+        
+        Args:
+            tick: The Protobuf Tick message containing market data.
         """
         idx = self.head
         
@@ -60,10 +88,20 @@ class TxfRingBuffer:
         self.total_volume[idx] = tick.total_volume
         self.tick_type[idx]    = tick.tick_type
         
-        # 價格正規化
-        price = tick.close / 10000.0
+        # 價格正規化 (Adaptive Scaling)
+        # Handle both Scaled Int (x10000) and Raw Int inputs
+        if tick.close > 500000: # Heuristic: > 50萬 represents scaled price (e.g. 20000 * 10000 = 2億)
+            price = tick.close / 10000.0
+        else:
+            price = float(tick.close)
+            
         self.close[idx] = price
-        self.underlying_price[idx] = tick.underlying_price / 10000.0
+        self.underlying_price[idx] = tick.underlying_price / 10000.0 # Keep this unless proven otherwise? Or apply same logic?
+        # Let's apply same logic to underlying
+        if tick.underlying_price > 500000:
+             self.underlying_price[idx] = tick.underlying_price / 10000.0
+        else:
+             self.underlying_price[idx] = float(tick.underlying_price)
 
         # --- 2. 狀態與累積更新 ---
         
@@ -110,6 +148,9 @@ class TxfRingBuffer:
         if self.head >= self.capacity:
             self.head = 0
             self.is_full = True
+            
+        # Update Header in Shared Memory (Atomic-ish)
+        self.wrapper.set_header(self.head, self.is_full)
 
     def get_snapshot(self):
         """
@@ -132,6 +173,14 @@ class TxfRingBuffer:
             self.cum_sell_vol,      # 12
             self.head               # 13
         )
+        
+    def refresh_state(self):
+        """
+        [Reader Mode Only]
+        從 Shared Memory 標頭讀取最新的 head 和 is_full 狀態。
+        在 Reader Process 每次計算前呼叫此函數。
+        """
+        self.head, self.is_full = self.wrapper.get_header()
 
     def clear(self):
         """
@@ -139,6 +188,7 @@ class TxfRingBuffer:
         """
         self.head = 0
         self.is_full = False
+        self.wrapper.set_header(0, False)
         
         # 使用 fill(0) 進行原地清零，效率極高
         self.timestamp.fill(0)

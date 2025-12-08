@@ -1,170 +1,56 @@
 # analysis/dash_logic.py
 
-import bisect
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# --- Local Configuration ---
+# --- 本地配置 ---
 from config.indicator_config import INDICATORS_SETUP, TYPE_OVERLAY, TYPE_OSCILLATOR
 from config.ui_theme import UI_COLOR
-from config.settings import TIMEFRAMES
+
+# --- 模組引入 ---
+from analysis.data_processor import process_market_data, get_last_value
+from analysis.chart_utils import create_blank_figure
 
 # =============================================================================
-# 🛠️ Helper Functions (輔助工具)
-# =============================================================================
-
-def create_blank_figure() -> go.Figure:
-    """
-    生成一個初始為黑色背景的空白 Plotly Figure。
-    用於初始化或無數據時的佔位顯示。
-    """
-    return go.Figure(
-        layout=go.Layout(
-            paper_bgcolor=UI_COLOR['BG_MAIN'],
-            plot_bgcolor=UI_COLOR['BG_MAIN'],
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            margin=dict(l=0, r=0, t=0, b=0)
-        )
-    )
-
-def get_last_value(history_dict: dict, key: str, default=0):
-    """
-    安全地從歷史數據字典中取得最新一筆值。
-    """
-    if key in history_dict and len(history_dict[key]) > 0:
-        return history_dict[key][-1]
-    return default
-
-# =============================================================================
-# 🧠 Core Logic: Data Processing (核心數據處理)
-# =============================================================================
-
-def process_market_data(indicator_manager, lookback_count, timeframe):
-    """
-    處理原始數據：執行解環 (Unroll)、切片 (Slicing)、降頻 (Downsampling) 與向量化運算。
-    
-    Args:
-        indicator_manager: RingBuffer 管理物件
-        lookback_count: 回溯 Tick 數 (Slider)
-        timeframe: K 線週期
-    Returns:
-        dict: 包含繪圖數據的字典 (None if no data)
-    """
-    
-    # 1. 數據解環 (RingBuffer -> Linear Array)
-    linear_timestamps = indicator_manager.get_linear_snapshot("timestamp")
-    raw_len = len(linear_timestamps)
-    
-    if raw_len == 0:
-        return None
-
-    # 2. 決定顯示範圍 (Scope Calculation)
-    tf_key = timeframe if timeframe in indicator_manager.candles else '10s'
-    period_ms = TIMEFRAMES.get(tf_key, 10000)
-    
-    # 防呆：確保 lookback 合理
-    lookback = int(lookback_count) if lookback_count else 50000
-    if lookback > raw_len:
-        lookback = raw_len
-    
-    start_idx = max(0, raw_len - lookback)
-    start_ts = linear_timestamps[start_idx] 
-    
-    # 3. 智慧降頻 (Smart Downsampling)
-    # 前端效能優化：限制最大繪圖點數
-    TARGET_POINTS = 2000
-    step = 1
-    if lookback > TARGET_POINTS: 
-        step = lookback // TARGET_POINTS
-    
-    # 4. Tick 數據準備 (Vectorized)
-    timestamps_slice = linear_timestamps[start_idx::step]
-    # int64 -> datetime64[ms] -> +8hr (UTC+8)
-    tick_x_axis = timestamps_slice.astype('datetime64[ms]') + np.timedelta64(8, 'h')
-    
-    # 5. K 線數據準備 (Candlesticks)
-    candles = indicator_manager.candles[tf_key]
-    current_candle = indicator_manager.current_candles[tf_key]
-    
-    # 二分搜尋定位
-    temp_idx = bisect.bisect_left(candles['time'], start_ts)
-    candle_start_idx = max(0, temp_idx - 1)
-    
-    plot_candles = {
-        'time': candles['time'][candle_start_idx:],
-        'open': candles['open'][candle_start_idx:],
-        'high': candles['high'][candle_start_idx:],
-        'low':  candles['low'][candle_start_idx:],
-        'close': candles['close'][candle_start_idx:]
-    }
-    
-    # 合併即時 K 線
-    if current_candle and current_candle.get('time'):
-        for k in plot_candles:
-            plot_candles[k].append(current_candle[k])
-
-    # K 線 X 軸計算 (平移至 K 線結束時間)
-    raw_candle_time = np.array(plot_candles['time'], dtype=np.int64)
-    candle_x = (raw_candle_time + period_ms).astype('datetime64[ms]') + np.timedelta64(8, 'h')
-
-    # 6. 指標數據解環
-    view_history = {}
-    for key in indicator_manager.history:
-        view_history[key] = indicator_manager.get_linear_snapshot(key)
-
-    # 7. 計算預設縮放範圍 (Auto-Range)
-    if len(tick_x_axis) > 0:
-        last_visible_ts = timestamps_slice[-1]
-        current_candle_end_ts = (last_visible_ts // period_ms) * period_ms + period_ms
-        x_max_ts = current_candle_end_ts + period_ms // 2
-        
-        x_min = tick_x_axis[0]
-        x_max = np.datetime64(int(x_max_ts), 'ms') + np.timedelta64(8, 'h')
-        default_range = [x_min, x_max]
-    else:
-        default_range = None
-
-    return {
-        'tick_x': tick_x_axis,
-        'candle_x': candle_x,
-        'candles': plot_candles,
-        'start_idx': start_idx,
-        'step': step,
-        'history': view_history,
-        'raw_len': raw_len,
-        'default_range': default_range,
-        'timeframe': tf_key
-    }
-
-# =============================================================================
-# 📈 Visualization: Combined Chart (主副圖合併)
+# 📈 視覺化核心 (Visualization Core)
 # =============================================================================
 
 def build_combined_figure(data):
     """
-    繪製主副圖合併的 Subplot。
-    Row 1: 價格 (Price) + Overlays
-    Row 2: 動能 (Momentum) + Oscillators
+    建立主副圖合併的 Plotly Figure 物件。
+    
+    佈局規劃 (2x2 Grid):
+    [ Row 1 ] 左: K線主圖 (90%) | 右: 籌碼分佈 (10%)
+    [ Row 2 ] 左: 動能副圖 (90%) | 右: 空白 (None)
+    
+    Args:
+        data: 由 data_processor.process_market_data 返回的數據字典
     """
     # 1. 建立子圖框架
     fig = make_subplots(
-        rows=2, cols=1, 
-        shared_xaxes=True, 
-        vertical_spacing=0.05,
-        row_heights=[0.7, 0.3], 
-        specs=[[{"secondary_y": False}], [{"secondary_y": True}]] 
+        rows=2, cols=2, 
+        shared_xaxes=True, # 上下兩圖共用 X 軸 (時間)
+        shared_yaxes=True, # 左右兩圖共用 Y 軸 (價格)
+        vertical_spacing=0.05,   # 上下間距
+        horizontal_spacing=0.05, # 左右間距
+        row_heights=[0.7, 0.3],     # 第一列佔 70% 高度
+        column_widths=[0.90, 0.10], # 主圖佔 90% 寬度
+        specs=[
+            [{"secondary_y": False}, {"secondary_y": False}], 
+            [{"secondary_y": True,  "colspan": 1}, None] # 副圖不需要右邊那塊，故 None
+        ] 
     )
 
     # ---------------------------------------------------------
-    # Row 1: 主圖 (Price)
+    # 第一列 (Row 1): 價格主圖 (Price Chart)
     # ---------------------------------------------------------
     current_tf = data.get('timeframe', '1m')
     is_high_freq = 's' in current_tf
     
-    # 繪製 K 線 (OHLC vs Candlestick)
+    # A. 繪製 K 線 (根據週期選擇 OHLC 或 Candlestick)
     if is_high_freq:
+        # 秒級圖使用 OHLC 線條模式 (效能較佳)
         fig.add_trace(go.Ohlc(
             x=data['candle_x'],
             open=data['candles']['open'], high=data['candles']['high'],
@@ -174,6 +60,7 @@ def build_combined_figure(data):
             increasing_line_width=1, decreasing_line_width=1
         ), row=1, col=1)
     else:
+        # 分K使用標準蠟燭圖
         fig.add_trace(go.Candlestick(
             x=data['candle_x'],
             open=data['candles']['open'], high=data['candles']['high'],
@@ -183,28 +70,29 @@ def build_combined_figure(data):
             increasing_fillcolor=UI_COLOR['UP'], decreasing_fillcolor=UI_COLOR['DOWN']
         ), row=1, col=1)
 
-    # 疊加指標 (Overlays: EMA, VWAP...)
-    # 預設關閉 (圖例由灰色變成彩色，點了才顯示線)
-    DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60']
+    # B. 疊加主圖指標 (Overlays: SMA, EMA, VWAP, Bollinger...)
+    # 定義預設只顯示圖例但不畫線的指標 (減輕視覺干擾)
+    DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60', 'SMA_20', 'Max_250', 'Min_250']
 
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
             y_data = data['history'][ind['id']][data['start_idx']::data['step']]
 
-            # 線圖的可見狀態 (True=顯示, False=隱藏, 'legendonly'=只顯圖例點擊才開)
+            # 設定可見狀態 ('legendonly' 代表點擊圖例才顯示)
             if ind['id'] in DEFAULT_OFF_LEGENDS:
                 vis_state = 'legendonly'
             else:
-                vis_state = True # 預設顯示
+                vis_state = True 
 
             fig.add_trace(go.Scattergl(
                 x=data['tick_x'], y=y_data, mode='lines', name=ind['id'],
                 line=dict(color=ind['color'], width=1, dash=ind.get('style', 'solid')),
-                visible=vis_state
+                visible=vis_state,
+                connectgaps=True # 允許跨越 NaN 連線 (布林通道需要)
             ), row=1, col=1)
 
     # ---------------------------------------------------------
-    # Row 2: 副圖 (Momentum)
+    # 第二列 (Row 2): 動能副圖 (Momentum / Oscillators)
     # ---------------------------------------------------------
     valid_indicators = [ind for ind in INDICATORS_SETUP if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']]
 
@@ -212,7 +100,7 @@ def build_combined_figure(data):
         ind_id = ind['id']
         y_data = data['history'][ind_id][data['start_idx']::data['step']]
 
-        # Case A: CVD (Line + Area) - 右軸
+        # Case A: CVD (累計成交量差) - 繪製於右軸 (Secondary Y)
         if ind_id == 'CVD':
             group_name = "cvd_group"
             
@@ -223,7 +111,7 @@ def build_combined_figure(data):
                 legendgroup=group_name, showlegend=True, legendrank=4
             ), row=2, col=1, secondary_y=True)
             
-            # 填充背景 (Vectorized separation)
+            # 背景色填充 (正負區分)
             y_pos = np.maximum(0, y_data)
             y_neg = np.minimum(0, y_data)
             common_fill = dict(mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 215, 0, 0.05)', hoverinfo='skip', legendgroup=group_name, showlegend=False)
@@ -231,7 +119,7 @@ def build_combined_figure(data):
             fig.add_trace(go.Scattergl(x=data['tick_x'], y=y_pos, **common_fill), row=2, col=1, secondary_y=True)
             fig.add_trace(go.Scattergl(x=data['tick_x'], y=y_neg, **common_fill), row=2, col=1, secondary_y=True)
         
-        # Case B: Retail Flow (Bar) - 左軸
+        # Case B: 散戶流向 (Retail Flow) - 繪製於左軸
         elif ind_id == 'Retail_Flow':
             bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
             fig.add_trace(go.Bar(
@@ -239,79 +127,97 @@ def build_combined_figure(data):
                 marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=1
             ), row=2, col=1, secondary_y=False)
 
-        # Case C: Smart Money (Bar) - 左軸
+        # Case C: 主力流向 (Smart Money) - 繪製於左軸
         elif ind_id == 'Smart_Money':
-            cols = np.where(y_data >= 0, "#8C5B00", "#006D91")
+            cols = np.where(y_data >= 0, "#8C5B00", "#006D91") # 金色/藍綠色
             fig.add_hline(y=0, line_width=1, line_color="#555", row=2, col=1)
             fig.add_trace(go.Bar(
                 x=data['tick_x'], y=y_data, name=f"{ind_id} (>= 5)",
                 marker_color=cols, marker_line_width=0, opacity=0.6, legendrank=2
             ), row=2, col=1, secondary_y=False)
 
-        # Case D: Whale Nuke (Bar) - 左軸
+        # Case D: 大戶核彈 (Whale Nuke) - 繪製於左軸
         elif ind_id == 'Whale_Nuke':
-            cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF")
+            cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF") # 紫色/青色
             fig.add_trace(go.Bar(
                 x=data['tick_x'], y=y_data, name=f"{ind_id} (>= 15)",
                 marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3
             ), row=2, col=1, secondary_y=False)
 
+        # Case E: 通用指標 (Z-Score, RSI 等) - 預設繪製於右軸
+        else:
+            fig.add_trace(go.Scattergl(
+                x=data['tick_x'], y=y_data, mode='lines', name=ind_id,
+                line=dict(color=ind['color'], width=1.0),
+                legendrank=5
+            ), row=2, col=1, secondary_y=True)
+
+    # ---------------------------------------------------------
+    # 第一列右側 (Row 1, Col 2): 籌碼分佈 (Volume Profile)
+    # ---------------------------------------------------------
+    vp_data = data.get('vp_data')
+    vp_stats = data.get('vp_stats')
+    
+    if vp_data:
+        colors = []
+        opacities = []
+        
+        poc = vp_stats['poc']
+        vah = vp_stats['vah']
+        val = vp_stats['val']
+        
+        # 根據價格區域塗色 (POC=黃, VA=藍, 其他=灰)
+        for p in vp_data['price']:
+            if p == poc:
+                colors.append('#FFFF00') 
+                opacities.append(1.0)
+            elif val <= p <= vah:
+                colors.append('rgba(0, 100, 255, 0.5)')
+                opacities.append(0.6)
+            else:
+                colors.append('rgba(100, 100, 100, 0.3)')
+                opacities.append(0.3)
+                
+        fig.add_trace(go.Bar(
+            x=vp_data['volume'], 
+            y=vp_data['price'],
+            orientation='h', # 水平長條圖
+            marker_color=colors,
+            marker_line_width=0,
+            showlegend=False,
+            hoverinfo='y+x',
+            name='Volume Profile'
+        ), row=1, col=2)
+        
+
     # =========================================================
-    # 🎨 Global Layout Configuration (全局版面設定)
+    # 🎨 全局版面設定 (Global Layout Configuration)
     # =========================================================
     
     initial_range = data.get('default_range')
 
     fig.update_layout(
-        # --- 1. 基礎外觀 (Appearance) ---
+        # --- 1. 基礎外觀 ---
         template='plotly_dark',
-        margin=dict(l=40, r=40, t=10, b=10),
+        margin=dict(l=5, r=5, t=5, b=5), # 極窄邊距
         paper_bgcolor=UI_COLOR['BG_MAIN'],
         plot_bgcolor=UI_COLOR['BG_MAIN'],
         
-        # --- 2. 交互行為 (Interaction) ---
+        # --- 2. 交互行為 ---
         uirevision='constant',  # 鎖定狀態：防止數據更新時重置縮放
         hovermode='x',          # 懸停模式
         
-        # --- 3. 圖例設定 (Legend) ---
+        # --- 3. 圖例設定 ---
         legend=dict(
             orientation="h", 
             yanchor="bottom", y=1.02, 
             xanchor="center", x=0.5
         ),
 
-        # --- 4. 條狀圖設定 (Bar Mode) ---
-        barmode='overlay',      # 關鍵：允許不同 Bar 重疊而非並排擠壓
-
-        # --- 5. Y 軸配置 (Y-Axes Configuration) ---
-        # [Axis 1] 主圖價格 (右軸)
-        yaxis=dict(
-            side='right', 
-            showgrid=True, 
-            gridcolor='#333', 
-            tickformat=',.0f'
-        ), 
+        # --- 4. 條狀圖設定 ---
+        barmode='overlay',      # 允許 Bar 重疊顯示
         
-        # [Axis 2] 副圖動能柱狀圖 (左軸)
-        yaxis2=dict(
-            side='left', 
-            showgrid=True, 
-            gridcolor='#333'
-        ),                    
-        
-        # [Axis 3] 副圖 CVD 線圖 (右軸，疊加於 Axis 2)
-        yaxis3=dict(
-            side='right', 
-            showgrid=False, 
-            tickformat=',.0f',
-            zeroline=True, 
-            zerolinewidth=1, 
-            zerolinecolor='rgba(255,255,255,0.3)',
-            overlaying='y2'     # 關鍵：共享副圖空間
-        ),
-        
-        # --- 6. X 軸配置 (X-Axis Base) ---
-        # 註：樣式統一由 update_xaxes 處理，此處僅設定範圍與滑桿
+        # --- 5. 初始化範圍 ---
         xaxis=dict(
             rangeslider=dict(visible=False),
             range=initial_range if initial_range else None
@@ -319,21 +225,72 @@ def build_combined_figure(data):
     )
     
     # =========================================================
-    # 📏 Axis Styling & Crosshair (軸線樣式與十字準星)
+    # 🔧 軸線安全設定 (Axis Safety Config)
+    # =========================================================
+
+    # 1. 強制計算 Y 軸範圍 (解決 Plotly Auto-Scale 失效問題)
+    y_min, y_max = None, None
+    candle_src = data['candles']
+    
+    if len(candle_src['low']) > 0:
+        y_min = min(candle_src['low'])
+        y_max = max(candle_src['high'])
+            
+    # 添加 10% 上下緩衝
+    if y_min is not None and y_max is not None:
+        spread = y_max - y_min
+        if spread == 0: spread = 100
+        pad = spread * 0.1 
+        forced_range = [y_min - pad, y_max + pad]
+    else:
+        forced_range = None
+
+    # 配置 Row 1 Y 軸 (主圖價格 - 右側顯示)
+    fig.update_yaxes(
+        side='right', 
+        showgrid=True, gridcolor='#333', tickformat=',.0f', 
+        row=1, col=1,
+        range=forced_range,
+        autorange=False if forced_range else True
+    )
+    
+    # 配置 Row 1 Col 2 X 軸 (籌碼分佈 - 隱藏刻度)
+    fig.update_xaxes(
+        title='Vol', showgrid=False, showticklabels=False, row=1, col=2 
+    ) 
+    
+    # 配置 Row 2 Y 軸 (副圖指標)
+    # 左軸 (Left): 柱狀圖 (Flow)
+    fig.update_yaxes(
+        side='left', 
+        showgrid=True, gridcolor='#333',
+        row=2, col=1, secondary_y=False
+    )
+    
+    # 右軸 (Right): 線圖 (CVD/Oscillator)
+    fig.update_yaxes(
+        side='right', 
+        showgrid=False, 
+        zeroline=True, zerolinewidth=1, zerolinecolor='rgba(255,255,255,0.3)',
+        row=2, col=1, secondary_y=True
+    )
+
+    # =========================================================
+    # 📏 樣式與十字準星 (Styling & Crosshair)
     # =========================================================
     
     fig.update_xaxes(
-        # 1. 網格與標籤
         showgrid=True,
-        showticklabels=True,  # 強制主副圖皆顯示時間
-        matches='x',          # 確保上下圖縮放同步
+        showticklabels=True,
+        matches='x', # 同步上下 X 軸
     
-        # 2. 十字準星 (Spikes)
+        # 十字準星
         showspikes=True,
-        spikemode='across',       # 橫跨模式：貫穿整個繪圖區
-        spikethickness=0.5,       # 線條粗細
-        spikedash='dash',         # 線條樣式：虛線
+        spikemode='across',
+        spikethickness=0.5,
+        spikedash='dash',
         spikecolor=UI_COLOR['TEXT_MAIN'], 
     )
     
     return fig
+
