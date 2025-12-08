@@ -183,7 +183,150 @@ class SharedRingBuffer:
             new_head = 0
             self.is_full = True # 寫入 Shared Memory
             
-        self.head = new_head # 更新 Shared Memory，這是 Reader 看到的訊號
+        self.head = new_head # Update head in Shared Memory (signal for readers)
+
+    def write_batch(self, ticks: list):
+        """
+        批次寫入大量 Ticks (Vectorized Write)
+        效能遠高於迴圈呼叫 write_tick。
+        """
+        n = len(ticks)
+        if n == 0: return
+
+        # 1. 準備數據 (Transformation)
+        # 為了效能，我們這裡做 List Comprehension，雖然有 Python overhead，
+        # 但比 n 次 Shared Memory access 快得多。
+        
+        # Extract basic fields
+        ts_arr = np.array([t.timestamp_ms for t in ticks], dtype=np.int64)
+        price_arr = np.array([t.close / 10000.0 for t in ticks], dtype=np.float64)
+        vol_arr = np.array([t.volume for t in ticks], dtype=np.int32)
+        type_arr = np.array([t.tick_type for t in ticks], dtype=np.int32)
+        # Others if needed... but let's stick to core logic
+        
+        # 2. 計算累積數據 (Vectorized Cumulative)
+        # 需要取得當前 Buffer 裡 "上一筆" 的累積值
+        current_head = self.head
+        prev_idx = current_head - 1
+        if prev_idx < 0: prev_idx = self.capacity - 1
+        
+        # Base values from previous state
+        last_cum_vol = self.cum_volume[prev_idx]
+        last_cum_pv = self.cum_pv[prev_idx]
+        last_cum_close = self.cum_close[prev_idx]
+        
+        last_cum_buy = self.cum_buy_vol[prev_idx]
+        last_cum_sell = self.cum_sell_vol[prev_idx]
+        
+        # Vectorized CumSum for the batch
+        batch_cum_vol = np.cumsum(vol_arr) + last_cum_vol
+        batch_cum_pv  = np.cumsum(price_arr * vol_arr) + last_cum_pv
+        batch_cum_close = np.cumsum(price_arr) + last_cum_close
+        
+        # Buy/Sell Volume Separation
+        buy_mask = (type_arr == 1)
+        sell_mask = (type_arr == 2)
+        
+        # numpy where to create 0/vol arrays
+        buy_vols = np.where(buy_mask, vol_arr, 0)
+        sell_vols = np.where(sell_mask, vol_arr, 0)
+        
+        batch_cum_buy = np.cumsum(buy_vols) + last_cum_buy
+        batch_cum_sell = np.cumsum(sell_vols) + last_cum_sell
+        
+        # Stateful High/Low (Need to be careful)
+        # Reset High/Low at 08:45 and 15:00... logic is complex in vectorized.
+        # 為了簡化，我們暫時使用 Python loop for High/Low state reset 
+        # 或者假設這批次內不會跨越開盤時間 (通常 batch 只包含幾百毫秒)
+        # 我們沿用上一筆的 Session High/Low 當作基準，然後跟自己的 batch 比較
+        
+        # 簡易實作：先用上一筆 High/Low，然後用 accumulate max 更新
+        last_high = self.session_high[prev_idx]
+        last_low = self.session_low[prev_idx]
+        
+        # 修正：如果上一筆是 0 (剛啟動)，則用第一筆 price
+        if last_high == 0: last_high = price_arr[0]
+        if last_low == 0: last_low = price_arr[0]
+        
+        # Numpy accumulate (Running Max)
+        batch_high = np.maximum.accumulate(price_arr)
+        batch_high = np.maximum(batch_high, last_high)
+        
+        batch_low = np.minimum.accumulate(price_arr)
+        batch_low = np.minimum(batch_low, last_low)
+        
+        # 3. 寫入 Shared Memory (Slicing)
+        # 處理 Ring Buffer Wrapping
+        # 我們要把 N 筆資料寫入從 current_head 開始的位置
+        
+        # Case 1: No Wrap
+        if current_head + n <= self.capacity:
+            end = current_head + n
+            
+            # Basic Arrays
+            self.timestamp[current_head:end] = ts_arr
+            self.close[current_head:end] = price_arr
+            self.volume[current_head:end] = vol_arr
+            self.tick_type[current_head:end] = type_arr
+            
+            # Cumulative Arrays
+            self.cum_volume[current_head:end] = batch_cum_vol
+            self.cum_pv[current_head:end] = batch_cum_pv
+            self.cum_close[current_head:end] = batch_cum_close
+            self.cum_buy_vol[current_head:end] = batch_cum_buy
+            self.cum_sell_vol[current_head:end] = batch_cum_sell
+            
+            # State Arrays
+            self.session_high[current_head:end] = batch_high
+            self.session_low[current_head:end] = batch_low
+            
+            # Update Head
+            self.head = end if end < self.capacity else 0
+            if end == self.capacity: self.is_full = True
+            
+        else:
+            # Case 2: Wrap Around
+            # Split into two chunks
+            # Chunk 1: Head -> Capacity
+            first_len = self.capacity - current_head
+            
+            # Chunk 2: 0 -> Remainder
+            remain_len = n - first_len
+            
+            # --- Write Chunk 1 ---
+            self.timestamp[current_head:] = ts_arr[:first_len]
+            self.close[current_head:] = price_arr[:first_len]
+            self.volume[current_head:] = vol_arr[:first_len]
+            self.tick_type[current_head:] = type_arr[:first_len]
+            
+            self.cum_volume[current_head:] = batch_cum_vol[:first_len]
+            self.cum_pv[current_head:] = batch_cum_pv[:first_len]
+            self.cum_close[current_head:] = batch_cum_close[:first_len]
+            self.cum_buy_vol[current_head:] = batch_cum_buy[:first_len]
+            self.cum_sell_vol[current_head:] = batch_cum_sell[:first_len]
+            
+            self.session_high[current_head:] = batch_high[:first_len]
+            self.session_low[current_head:] = batch_low[:first_len]
+            
+            self.is_full = True # We hit the end
+            
+            # --- Write Chunk 2 ---
+            self.timestamp[:remain_len] = ts_arr[first_len:]
+            self.close[:remain_len] = price_arr[first_len:]
+            self.volume[:remain_len] = vol_arr[first_len:]
+            self.tick_type[:remain_len] = type_arr[first_len:]
+            
+            self.cum_volume[:remain_len] = batch_cum_vol[first_len:]
+            self.cum_pv[:remain_len] = batch_cum_pv[first_len:]
+            self.cum_close[:remain_len] = batch_cum_close[first_len:]
+            self.cum_buy_vol[:remain_len] = batch_cum_buy[first_len:]
+            self.cum_sell_vol[:remain_len] = batch_cum_sell[first_len:]
+            
+            self.session_high[:remain_len] = batch_high[first_len:]
+            self.session_low[:remain_len] = batch_low[first_len:]
+
+            # Update Head
+            self.head = remain_len
 
     def get_snapshot(self):
         """
@@ -209,24 +352,27 @@ class SharedRingBuffer:
         )
 
     def shutdown(self):
-        """關閉 SharedMemory 連線"""
+        """關閉 SharedMemory 連線 (Idempotent: 可重複呼叫)"""
         # 1. 防止 Resource Tracker 誤報 (Reader/Writer 都要做)
-        # Python 的 multiprocessing.resource_tracker 會試圖在進程結束時 unlink 所有它知道的 SHM
-        # 我們手動管理生命週期，所以要叫它閉嘴
         try:
             from multiprocessing import resource_tracker
-            # 必須使用 _name 因為 shm.name 可能因版本不同有差異，但通常是一樣的
+            # Unregister first to silence tracker
             resource_tracker.unregister(self.shm._name, "shared_memory")
         except Exception:
-            pass
+            pass # 可能已經被 unregister 過，或 name 不存在
 
         # 2. 關閉 FD
-        self.shm.close()
+        try:
+            self.shm.close()
+        except Exception:
+            pass
         
         # 3. 如果是擁有者 (Writer)，負責銷毀實體檔案
         if self.is_owner:
             try:
                 self.shm.unlink()
                 self.logger.info(f"SharedMemory '{self.name}' unlinked.")
-            except FileNotFoundError:
+            except (FileNotFoundError, IndexError, ValueError):
                 pass
+            except Exception as e:
+                self.logger.warning(f"Unlink warning: {e}")

@@ -64,38 +64,43 @@ class GaleKafkaConsumer:
             self.logger.info("Kafka Consumer closed.")
 
 
-    async def consume_stream(self):
+    async def consume_stream(self, batch_size: int = 500):
         """
-        Async Generator: 持續產生訊息。
+        Async Generator: 持續產生訊息列表 (Batch processing)。
         配合外部的 UVLOOP 運行。
         """
         if not self.consumer:
             raise RuntimeError("Consumer not connected.")
 
-        self.logger.info("Starting async consumption loop...")
+        self.logger.info(f"Starting async consumption loop (Batch Size: {batch_size})...")
         
         # 使用 asyncio.get_event_loop().run_in_executor 來避免 poll 阻塞主線程
         loop = asyncio.get_running_loop()
 
         try:
             while True:
-                # 這裡使用 run_in_executor 是為了讓 blocking 的 poll() 不會卡住 asyncio loop
-                # timeout 設短一點可以讓 loop 有機會響應中斷
-                msg = await loop.run_in_executor(None, self.consumer.poll, 0.1)
+                # 使用 consume 批次獲取，大幅減少 Context Switch
+                # run_in_executor 仍然是必要的，因為 consume 在 C 層面是 blocking 的
+                msgs = await loop.run_in_executor(None, self.consumer.consume, batch_size, 0.1)
 
-                if msg is None:
+                if not msgs:
+                    # 沒訊息，繼續
                     continue
                 
-                if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    else:
-                        self.logger.error(f"Kafka Error: {msg.error()}")
-                        continue
+                valid_batch = []
+                for msg in msgs:
+                    if msg.error():
+                        if msg.error().code() == KafkaError._PARTITION_EOF:
+                            continue
+                        else:
+                            self.logger.error(f"Kafka Error: {msg.error()}")
+                            continue
+                    
+                    # 收集有效訊息
+                    valid_batch.append(msg.value())
                 
-                # 成功獲取消息，yield 出去給 Core Processor 處理
-                # 這裡傳回原始 bytes，反序列化交給下一層做，保持 Consumer 單純
-                yield msg.value()
+                if valid_batch:
+                    yield valid_batch
 
         except asyncio.CancelledError:
             self.logger.info("Consumption loop cancelled.")

@@ -138,62 +138,15 @@ def calc_sma(cum_close: np.ndarray,
 
 
 @jit(nopython=True, cache=True, fastmath=True)
-def calc_vwap_time(prices: np.ndarray, 
-                   volumes: np.ndarray, 
-                   timestamps: np.ndarray,  # <--- 新增：需要時間陣列
+def calc_vwap_time(cum_pv: np.ndarray, 
+                   cum_vol: np.ndarray, 
+                   timestamps: np.ndarray,
                    head: int, 
-                   time_window_ms: int,     # <--- 參數變成毫秒數
+                   time_window_ms: int,
                    capacity: int) -> float:
     """
-    計算「時間基礎」的 VWAP (例如：過去 60 秒的 VWAP)
-    """
-    # 1. 取得當前最新時間
-    curr_idx = head - 1
-    if curr_idx < 0: curr_idx += capacity
-    
-    current_time = timestamps[curr_idx]
-    if current_time == 0: return np.nan # 防呆
-    
-    # 計算截止時間 (Cut-off time)
-    target_time = current_time - time_window_ms
-    
-    sum_pv = 0.0
-    sum_v = 0.0
-    
-    # 2. 往回回溯 (不定長度，直到時間超過範圍)
-    # 我們設定一個最大回溯上限 (例如 10萬筆) 避免無窮迴圈
-    for i in range(capacity): 
-        idx = head - 1 - i
-        if idx < 0: idx += capacity
-        
-        ts = timestamps[idx]
-        
-        # 終止條件：
-        # A. 遇到空數據 (0)
-        # B. 該筆數據的時間早於截止時間
-        if ts == 0 or ts < target_time:
-            break
-            
-        p = prices[idx]
-        v = volumes[idx]
-        
-        sum_pv += p * v
-        sum_v += v
-        
-    if sum_v == 0:
-        return np.nan
-        
-    return sum_pv / sum_v
-
-@jit(nopython=True, cache=True, fastmath=True)
-def calc_sma_time(cum_close: np.ndarray, # ⚠️ 改用累積值
-                  timestamps: np.ndarray, 
-                  head: int, 
-                  time_window_ms: int, 
-                  capacity: int) -> float:
-    """
-    計算「時間基礎」的 SMA (例如：過去 1 分鐘的均價) - Optimized
-    使用 Prefix Sum 只要找到時間邊界，就能 O(1) 算出總和。
+    計算「時間基礎」的 VWAP (O(log N) Optimized)
+    Use: Sum(PV) / Sum(Volume)
     """
     curr_idx = head - 1
     if curr_idx < 0: curr_idx += capacity
@@ -203,57 +156,159 @@ def calc_sma_time(cum_close: np.ndarray, # ⚠️ 改用累積值
     
     target_time = current_time - time_window_ms
     
-    # --- 1. 搜尋時間邊界 (Linear Search) ---
-    # 雖然這裡還是 O(N) 搜尋，但比 O(N) 加法快，且 Numba 執行極快。
-    # 若要極致優化可用 Binary Search，但在 K 棒/Tick 資料下通常線性夠快。
+    # 1. Binary Search 找邊界
+    found_k = binary_search_boundary(timestamps, head, target_time, capacity)
     
-    found_idx = -1
-    count = 0
+    if found_k == -1: found_k = capacity
+    if found_k == 0: return np.nan
     
-    # 快速回溯
-    for i in range(capacity):
-        idx = head - 1 - i
+    # head - 1 - found_k : the index just outside the window
+    boundary_idx = head - 1 - found_k
+    if boundary_idx < 0: boundary_idx += capacity
+    
+    # 2. 用 Prefix Sum O(1) 計算區間總合
+    # Window PV = CumPV[curr] - CumPV[boundary]
+    # Window Vol = CumVol[curr] - CumVol[boundary]
+    
+    sum_pv = cum_pv[curr_idx] - cum_pv[boundary_idx]
+    sum_v  = cum_vol[curr_idx] - cum_vol[boundary_idx]
+    
+    if sum_v == 0:
+        return np.nan
+        
+    return sum_pv / sum_v
+
+@jit(nopython=True, cache=True, fastmath=True)
+def binary_search_boundary(timestamps: np.ndarray, 
+                           head: int, 
+                           target_time: float, 
+                           capacity: int) -> int:
+    """
+    使用二分搜尋法在 RingBuffer 中尋找時間邊界 (Find first index where ts < target_time)。
+    
+    Mapping Strategy:
+    Logical Index 0 = head - 1 (Latest)
+    Logical Index k = head - 1 - k (History)
+    
+    Timestamps in Logical Index sequence are DESCENDING: [T_now, T_now-1, ...]
+    But Binary Search usually works on ASCENDING arrays.
+    
+    So we search on Logical Index k [0, capacity].
+    Wait, Timestamps array is physically circular but logically Sorted (Monotonic).
+    
+    Logical View: 
+    Idx 0:   10:00:05 (Latest)
+    Idx 1:   10:00:04
+    ...
+    Idx N:   09:00:00
+    
+    We want smallest `k` such that timestamp[logical k] < target_time.
+    Since array is DESCENDING, first element < target matches "binary search right side".
+    
+    Let's use classic binary search on Logical Index k.
+    Low = 0, High = capacity - 1 (or valid count)
+    
+    If ts[mid] >= target_time:
+        # We need to go deeper into history (larger k) because array is descending.
+        # But wait, if TS >= Target, it means this point is STILL INSIDE the window.
+        # We want to find OUTSIDE the window.
+        # So we want larger k.
+        Low = mid + 1
+    else:
+        # TS < Target. This point is outside.
+        # Could be the boundary, or something even earlier (smaller k is closer to boundary).
+        # We want the *first* one that is outside.
+        High = mid - 1
+        Ans = mid
+        
+    """
+    low = 0
+    # Determine search depth: limited by actual valid data count if we had it, 
+    # but lacking that, we assume full capacity or stop at 0.
+    # Better to just search full capacity. Sentinel 0s will be < target_time (since target ~ current time).
+    high = capacity - 1 
+    
+    ans = -1
+    
+    while low <= high:
+        mid = (low + high) // 2
+        
+        # Convert Logical mid to Physical idx
+        idx = head - 1 - mid
         if idx < 0: idx += capacity
         
         ts = timestamps[idx]
         
-        # 終止條件：
-        # A. 遇到空數據
-        # B. 該筆數據的時間早於截止時間
-        if ts == 0 or ts < target_time:
-            # 找到邊界的前一筆 (不包含這筆)
-            # 所以我們要的區間是 [idx+1 ... curr_idx]
-            # 對應到 Prefix Sum diff 公式： Cum[curr] - Cum[idx]
-            found_idx = idx
-            break
+        # Check validity (0 is considered extremely old, so < target_time)
+        if ts == 0:
+            # 0 < target. It is "outside". Try smaller k to find the first outside.
+            ans = mid
+            high = mid - 1
+            continue
             
-        count += 1
-        
-    if count == 0:
+        if ts < target_time:
+            # Found a point outside window.
+            # Try to see if there is a smaller k that is also outside (closer to boundary)
+            ans = mid
+            high = mid - 1
+        else:
+            # ts >= target_time. Still inside window.
+            # Need to look further back (larger k).
+            low = mid + 1
+            
+    return ans
+
+@jit(nopython=True, cache=True, fastmath=True)
+def calc_sma_time(cum_close: np.ndarray, 
+                  timestamps: np.ndarray, 
+                  head: int, 
+                  time_window_ms: int, 
+                  capacity: int) -> float:
+    """
+    計算「時間基礎」的 SMA (O(log N) Optimized)
+    """
+    curr_idx = head - 1
+    if curr_idx < 0: curr_idx += capacity
+    
+    current_time = timestamps[curr_idx]
+    if current_time == 0: return np.nan
+    
+    target_time = current_time - time_window_ms
+    
+    # 1. Binary Search 找邊界 (Logical Index)
+    # found_k 是第一個 "小於 target_time" 的位置 (即剛好出局的那筆)
+    found_k = binary_search_boundary(timestamps, head, target_time, capacity)
+    
+    if found_k == -1:
+        # 沒找到小於 target 的 -> 代表全部都在 window 內 (或是 buffer 全空?)
+        # 這種情況我們應該拿整個 buffer 計算嗎？
+        # 如果 buffer 滿了，最後一筆還是 >= target，那說明 window 超大，超過 buffer 容量。
+        # 我們就用整個 buffer
+        found_k = capacity 
+    
+    if found_k == 0:
+        # 第一筆就出局了 (Window 太小，涵蓋不到任何過去資料)
         return np.nan
 
-    # --- 2. 使用 Prefix Sum 計算總和 (O(1)) ---
-    # 邏輯：Sum(Start...End) = Cum[End] - Cum[Start-1]
-    # 在我們的 Search 迴圈停下來的 idx 剛好就是 "Start-1" (即超出範圍的那筆)
+    # 2. 計算區間
+    # Window 區間是 Logical [0 ... found_k - 1]
+    # 也就是 Physical [curr_idx ... boundary_prev]
+    # boundary_idx (Physical) = head - 1 - found_k
     
-    # 修正：如果 idx 指向的是空數據(0)，那 Cum[idx] 也是 0，減去 0 是安全的。
+    boundary_idx = head - 1 - found_k
+    if boundary_idx < 0: boundary_idx += capacity
     
-    prev_idx = found_idx
+    # Prefix Sum Diff: Cum[End] - Cum[Start-1]
+    # End = curr_idx
+    # Start = ... (從 binary search 回推)
+    # 其實：Cum[curr] - Cum[boundary]
+    # boundary 就是那個 "剛好出局" 的點。
+    # 減去它累積的值，剩下的就是 [curr ... boundary+1] 的總和
     
-    # 邊界檢查：如果整個 Buffer 都還沒寫滿，且搜尋到了盡頭
-    if prev_idx == -1:
-        # 代表找遍了整個 Buffer 都符合時間條件 (資料量不足 window)
-        # 此時 prev_idx 應該是 (head - 1 - capacity) % capacity...?
-        # 不，這種情況下最舊的一筆就是 Buffer 裡最老的一筆。
-        # 我們可以用 cum_close[curr] - 0 (如果剛好繞一圈??)
-        # 簡單起見，如果找不到邊界，代表整個 Buffer 都是有效數據
-        # Sum = cum_close[curr] - cum_close[oldest_valid_idx - 1]
-        # 這有點複雜。
-        # 實際上，如果 buffer 滿了，found_idx 就不會是 -1 (一定會撞到自己)
-        pass
-
-    # 計算 Sum
-    total_val = cum_close[curr_idx] - cum_close[prev_idx]
+    total_val = cum_close[curr_idx] - cum_close[boundary_idx]
+    
+    # 數量就是 found_k (0到found_k-1 共K筆)
+    count = found_k
     
     return total_val / count
 
@@ -319,99 +374,82 @@ def calc_rolling_min(data_array: np.ndarray,
 
 @jit(nopython=True, cache=True, fastmath=True)
 def calc_rolling_max_time(data_array: np.ndarray, 
-                          time_array: np.ndarray, # 🆕 需要時間陣列
+                          time_array: np.ndarray, 
                           head: int, 
-                          period_ms: int, # 🆕 單位是毫秒 (ms)
+                          period_ms: int, 
                           capacity: int) -> float:
     """
-    計算過去 period_ms 毫秒內的最高值 (Time-Based Rolling Max)
+    計算過去 period_ms 毫秒內的最高值 (O(N) Scans, but O(log N) for boundary)
     """
     curr_idx = head - 1
     if curr_idx < 0: curr_idx += capacity
         
-    end_time = time_array[curr_idx]
-    if end_time == 0:
-        return np.nan # 數據不足
-
-    start_time_threshold = end_time - period_ms
-    max_val = -1.0
+    current_time = time_array[curr_idx]
+    if current_time == 0: return np.nan
     
-    # 從 head 往前跑，直到時間點超出視窗
-    i = 0
-    while True:
+    target_time = current_time - period_ms
+    
+    # 1. Binary Search 找邊界 (Count K)
+    # found_k is the number of elements INSIDE the window
+    found_k = binary_search_boundary(time_array, head, target_time, capacity)
+    
+    if found_k == -1: found_k = capacity
+    if found_k == 0: return np.nan
+    
+    search_count = found_k
+    max_val = -1e9 # Init small
+    
+    # 2. 只需迴圈 value，不用再 check timestamp
+    # 這裡還是 O(K) 線性掃描，若要 O(1) 需用 Monotonic Queue，但在 Stateless 設計下做不到
+    for i in range(search_count):
         idx = head - 1 - i
         if idx < 0: idx += capacity
-            
-        val = data_array[idx]
-        ts = time_array[idx]
         
-        # 1. 檢查是否超出時間視窗
-        if ts < start_time_threshold:
-            break
-            
-        # 2. 檢查數據是否有效
-        if val == 0.0:
-            break
-            
-        # 3. 更新 Max
-        if max_val == -1.0 or val > max_val:
+        val = data_array[idx]
+        if val == 0.0: continue # Skip empty
+        
+        if val > max_val:
             max_val = val
             
-        i += 1
-        
-        # 避免無限迴圈 (雖然有時間判斷，但還是防一下)
-        if i >= capacity:
-            break
-            
-    # 確保至少有一個有效值被計算 (如果 i=0 就退出，代表 period 太短或數據不足)
-    if max_val == -1.0:
+    if max_val == -1e9:
         return np.nan
         
     return max_val
 
 @jit(nopython=True, cache=True, fastmath=True)
 def calc_rolling_min_time(data_array: np.ndarray, 
-                          time_array: np.ndarray, # 🆕 需要時間陣列
+                          time_array: np.ndarray, 
                           head: int, 
-                          period_ms: int, # 🆕 單位是毫秒 (ms)
+                          period_ms: int, 
                           capacity: int) -> float:
     """
-    計算過去 period_ms 毫秒內的最低值 (Time-Based Rolling Min)
+    計算過去 period_ms 毫秒內的最低值 (O(N) Scans, but O(log N) for boundary)
     """
     curr_idx = head - 1
     if curr_idx < 0: curr_idx += capacity
         
-    end_time = time_array[curr_idx]
-    if end_time == 0:
-        return np.nan # 數據不足
-
-    start_time_threshold = end_time - period_ms
-    min_val = 1e9 # 初始設為極大值
+    current_time = time_array[curr_idx]
+    if current_time == 0: return np.nan
     
-    i = 0
-    while True:
+    target_time = current_time - period_ms
+    
+    found_k = binary_search_boundary(time_array, head, target_time, capacity)
+    
+    if found_k == -1: found_k = capacity
+    if found_k == 0: return np.nan
+    
+    search_count = found_k
+    min_val = 1e9 # Init large
+    
+    for i in range(search_count):
         idx = head - 1 - i
         if idx < 0: idx += capacity
-            
+        
         val = data_array[idx]
-        ts = time_array[idx]
+        if val == 0.0: continue
         
-        # 1. 檢查是否超出時間視窗
-        if ts < start_time_threshold:
-            break
-            
-        # 2. 檢查數據是否有效
-        if val == 0.0:
-            break
-            
-        # 3. 更新 Min
-        if min_val == 1e9 or val < min_val:
+        if val < min_val:
             min_val = val
-            
-        i += 1
-        
-        if i >= capacity:
-            break
             
     if min_val == 1e9:
         return np.nan

@@ -73,21 +73,28 @@ class IngestServer:
         write_tick = self.ring_buffer.write_tick # Bound method cache
         
         try:
-            async for raw_bytes in self.consumer.consume_stream():
+            async for batch_msgs in self.consumer.consume_stream():
                 if not self.running: break
                 
-                try:
-                    self.current_tick.ParseFromString(raw_bytes)
-                    
-                    # 🔥 Write to Shared Memory
-                    write_tick(self.current_tick)
-                    
-                    processed_count += 1
-                    if processed_count % 10000 == 0:
-                        logger.info(f"Written {processed_count} ticks. Latest: {self.current_tick.close/10000.0}")
-                        
-                except Exception as e:
-                    logger.error(f"Processing Error: {e}")
+                # Parse all messages in batch
+                valid_ticks = []
+                for raw_bytes in batch_msgs:
+                    try:
+                        t = Tick()
+                        t.ParseFromString(raw_bytes)
+                        valid_ticks.append(t)
+                        processed_count += 1
+                    except Exception as e:
+                        logger.error(f"Processing Error: {e}")
+                
+                # 🔥 Vectorized Write
+                if valid_ticks:
+                    self.ring_buffer.write_batch(valid_ticks)
+                
+                # Batch log
+                n_batch = len(valid_ticks)
+                if n_batch > 0 and (processed_count % 10000 < n_batch):
+                     logger.info(f"Written batch {n_batch} ticks. Total: {processed_count}. Latest: {valid_ticks[-1].close/10000.0}")
                     
         except asyncio.CancelledError:
             logger.info("Ingestion task cancelled.")

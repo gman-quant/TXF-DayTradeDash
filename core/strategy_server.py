@@ -6,7 +6,7 @@ import threading
 import argparse
 from core.shared_memory import SharedRingBuffer
 from core.indicator_manager import IndicatorManager
-from analysis.dashboard_server import start_dashboard_server
+from core.indicator_manager import IndicatorManager
 
 # Logging
 logging.basicConfig(
@@ -48,14 +48,8 @@ class StrategyServer:
         # (V1.0 假設盤中重啟不超過 buffer 容量)
 
     def run(self):
-        # 1. 啟動 Dashboard (在獨立 Thread)
-        dash_thread = threading.Thread(
-            target=start_dashboard_server, 
-            args=(self.manager, 8050),
-            daemon=True
-        )
-        dash_thread.start()
-        logger.info("📊 Dashboard running at http://localhost:8050")
+        # 1. 啟動 Dashboard (已移除，獨立進程處理)
+        # logger.info("📊 Dashboard moved to independent process.")
         
         logger.info("🚀 Strategy Server (Reader) Started. Syncing...")
         
