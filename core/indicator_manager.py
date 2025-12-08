@@ -233,9 +233,22 @@ class IndicatorManager:
         ts_val = ring_buffer.timestamp[last_read_idx]
         cl_val = ring_buffer.close[last_read_idx]
         
+        # [RACE CONDITION CHECK]
+        # 等待 Writer 完成寫入。如果讀到的 Timestamp 還是 0，代表記憶體尚未同步完成。
+        # 改為有限次數重試，避免無窮迴圈
+        retry_count = 0
+        MAX_RETRIES = 100
+        
+        while (ts_val == 0 or cl_val == 0) and retry_count < MAX_RETRIES:
+             # Force reload from memory view (though numpy view typically reflects underlying memory)
+             ts_val = ring_buffer.timestamp[last_read_idx]
+             cl_val = ring_buffer.close[last_read_idx]
+             retry_count += 1
+             
         if ts_val == 0 or cl_val == 0:
-            print(f"⚠️ 偵測到 Race Condition (資料未就緒): Index={last_read_idx}. 等待下一輪...")
+            print(f"⚠️ 嚴重警告: 偵測到 Race Condition 且重試逾時 (Index={last_read_idx}). 跳過此批次同步。")
             return
+
             
         # 取得 Shared Memory 的視圖 (View Snapshot)
         snapshot_tuple = ring_buffer.get_snapshot()

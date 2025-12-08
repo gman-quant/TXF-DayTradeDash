@@ -114,9 +114,20 @@ def run_ingestion_process(args):
 
             try:
                 current_tick.ParseFromString(raw_msg_bytes)
+                
+                # [VALIDATION] 濾除無效或不完整的 Tick (避免 0 Timestamp 卡住 Reader)
+                if current_tick.timestamp_ms <= 0:
+                    logger.warning(f"⚠️ 忽略無效 Tick (TS=0): {current_tick}")
+                    continue
+                    
                 write_tick(current_tick) # O(1) 寫入共享記憶體
                 
                 processed_count += 1
+                
+                # [DEBUG] 前 10 筆資料詳細打印，確保入料正確
+                if processed_count <= 10:
+                    logger.info(f"✅ Tick Received: TS={current_tick.timestamp_ms}, Price={current_tick.close}")
+                
                 if processed_count % 5000 == 0:
                      logger.info(f"已處理 {processed_count} 筆 Tick. 最新價: {current_tick.close/10000.0}")
                     
@@ -175,6 +186,9 @@ def run_strategy_process(args):
         sync_count = 0
         
         while True:
+            # 必須手動刷新 Shared Memory 狀態，否則永遠讀不到變更
+            ring_buffer.refresh_state()
+            
             # 獲取当前 Writer 的寫入位置
             target_head = ring_buffer.head
             
@@ -186,9 +200,8 @@ def run_strategy_process(args):
                     local_head = target_head
                     
                     sync_count += 1
-                    if sync_count % 5000 == 0:
-                        # 簡單監控
-                        pass
+                    if sync_count % 100 == 0:
+                        logger.info(f"Reader Sync: Dispatched {sync_count} batches. Current Head: {target_head}")
                         
                 except Exception as e:
                     logger.error(f"指標計算錯誤: {e}")
