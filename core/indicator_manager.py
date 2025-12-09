@@ -4,6 +4,7 @@ import numpy as np
 import core.numba_engine as engine
 from config.indicator_config import INDICATORS_SETUP
 from config.settings import TIMEFRAMES
+from core.volume_profile import VolumeProfileEngine
 
 class IndicatorManager:
     """
@@ -41,6 +42,9 @@ class IndicatorManager:
                 'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': []
             }
             self.current_candles[tf_name] = {}
+
+        # 2.5 Initialize Volume Profile Engine
+        self.vp_engine = VolumeProfileEngine()
 
         # ==========================================
         # 3. ⚡️ 預先綁定 (Pre-binding) 邏輯
@@ -239,5 +243,10 @@ class IndicatorManager:
         # 5. 更新 K 線 (邏輯不變)
         # ==========================================
         self._update_candles(time_val, close_val, vol_val)
+        
+        # ==========================================
+        # 6. 更新 Volume Profile (Thread-Safe Update)
+        # ==========================================
+        self.vp_engine.update(close_val, vol_val)
         
         

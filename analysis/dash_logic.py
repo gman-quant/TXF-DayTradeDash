@@ -10,6 +10,9 @@ from config.indicator_config import INDICATORS_SETUP, TYPE_OVERLAY, TYPE_OSCILLA
 from config.ui_theme import UI_COLOR
 from config.settings import TIMEFRAMES
 
+VP_LEGEND_GROUP = "Volume_Profile"
+VP_BIN_SIZE = 10
+
 # =============================================================================
 # 🛠️ Helper Functions (輔助工具)
 # =============================================================================
@@ -125,6 +128,11 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         default_range = [x_min, x_max]
     else:
         default_range = None
+        
+    # 8. Extract Volume Profile Data (with Binning)
+    # User requested 20-point aggregation for better visibility and performance
+    vp_prices, vp_volumes = indicator_manager.vp_engine.get_distribution(bin_size=VP_BIN_SIZE)
+    poc, vah, val = indicator_manager.vp_engine.calculate()
 
     return {
         'tick_x': tick_x_axis,
@@ -135,7 +143,14 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'history': view_history,
         'raw_len': raw_len,
         'default_range': default_range,
-        'timeframe': tf_key
+        'timeframe': tf_key,
+        'vp_data': {
+            'prices': vp_prices,
+            'volumes': vp_volumes,
+            'poc': poc,
+            'vah': vah,
+            'val': val
+        }
     }
 
 # =============================================================================
@@ -160,101 +175,58 @@ def build_combined_figure(data):
     # ---------------------------------------------------------
     # Row 1: 主圖 (Price)
     # ---------------------------------------------------------
-    current_tf = data.get('timeframe', '1m')
-    is_high_freq = 's' in current_tf
-    
-    # 繪製 K 線 (OHLC vs Candlestick)
-    if is_high_freq:
-        fig.add_trace(go.Ohlc(
-            x=data['candle_x'],
-            open=data['candles']['open'], high=data['candles']['high'],
-            low=data['candles']['low'], close=data['candles']['close'],
-            name=f'{current_tf} OHLC',
-            increasing_line_color=UI_COLOR['TEXT_MAIN'], decreasing_line_color=UI_COLOR['TEXT_MAIN'],
-            increasing_line_width=1, decreasing_line_width=1
-        ), row=1, col=1)
-    else:
-        fig.add_trace(go.Candlestick(
-            x=data['candle_x'],
-            open=data['candles']['open'], high=data['candles']['high'],
-            low=data['candles']['low'], close=data['candles']['close'],
-            name=f'{current_tf} Candle',
-            increasing_line_color=UI_COLOR['UP'], decreasing_line_color=UI_COLOR['DOWN'],
-            increasing_fillcolor=UI_COLOR['UP'], decreasing_fillcolor=UI_COLOR['DOWN']
-        ), row=1, col=1)
+    # =========================================================
+    # 📉 Chart Renderers (Modularized)
+    # =========================================================
+    import analysis.chart_renderers as renderers
 
-    # 疊加指標 (Overlays: EMA, VWAP...)
-    # 預設關閉 (圖例由灰色變成彩色，點了才顯示線)
+    # 1. Main Chart (Row 1)
+    renderers.add_main_price_chart(fig, data, row=1, col=1)
+
+    # 2. Overlays (Row 1)
+    # Default OFF (Legend Only)
     DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60']
-
+    
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
-            y_data = data['history'][ind['id']][data['start_idx']::data['step']]
+            # Start count
+            n_traces_before = len(fig.data)
+            renderers.add_overlay_indicator(fig, data, ind, row=1, col=1)
+            # The new trace is at -1
+            if len(fig.data) > n_traces_before:
+                if ind['id'] in DEFAULT_OFF_LEGENDS:
+                    fig.data[-1].visible = 'legendonly'
+                else:
+                    fig.data[-1].visible = True
 
-            # 線圖的可見狀態 (True=顯示, False=隱藏, 'legendonly'=只顯圖例點擊才開)
-            if ind['id'] in DEFAULT_OFF_LEGENDS:
-                vis_state = 'legendonly'
-            else:
-                vis_state = True # 預設顯示
-
-            fig.add_trace(go.Scattergl(
-                x=data['tick_x'], y=y_data, mode='lines', name=ind['id'],
-                line=dict(color=ind['color'], width=1, dash=ind.get('style', 'solid')),
-                visible=vis_state
-            ), row=1, col=1)
-
-    # ---------------------------------------------------------
-    # Row 2: 副圖 (Momentum)
-    # ---------------------------------------------------------
+    # 3. Oscillators (Row 2)
     valid_indicators = [ind for ind in INDICATORS_SETUP if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']]
-
+    
     for ind in valid_indicators:
         ind_id = ind['id']
         y_data = data['history'][ind_id][data['start_idx']::data['step']]
-
-        # Case A: CVD (Line + Area) - 右軸
-        if ind_id == 'CVD':
-            group_name = "cvd_group"
-            
-            # 主線
-            fig.add_trace(go.Scattergl(
-                x=data['tick_x'], y=y_data, mode='lines', name=ind_id,
-                line=dict(color=ind['color'], width=1.0), 
-                legendgroup=group_name, showlegend=True, legendrank=4
-            ), row=2, col=1, secondary_y=True)
-            
-            # 填充背景 (Vectorized separation)
-            y_pos = np.maximum(0, y_data)
-            y_neg = np.minimum(0, y_data)
-            common_fill = dict(mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 215, 0, 0.05)', hoverinfo='skip', legendgroup=group_name, showlegend=False)
-            
-            fig.add_trace(go.Scattergl(x=data['tick_x'], y=y_pos, **common_fill), row=2, col=1, secondary_y=True)
-            fig.add_trace(go.Scattergl(x=data['tick_x'], y=y_neg, **common_fill), row=2, col=1, secondary_y=True)
+        x_data = data['tick_x']
         
-        # Case B: Retail Flow (Bar) - 左軸
-        elif ind_id == 'Retail_Flow':
-            bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
-            fig.add_trace(go.Bar(
-                x=data['tick_x'], y=y_data, name=f"{ind_id} (< 5)",
-                marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=1
-            ), row=2, col=1, secondary_y=False)
+        # Dynamic Dispatch logic
+        # e.g. render_cvd, render_retail_flow
+        method_name = f"render_{ind_id.lower()}"
+        renderer = getattr(renderers.OscillatorRenderers, method_name, None)
+        
+        if renderer:
+            renderer(fig, x_data, y_data, ind, row=2, col=1)
+        else:
+            # Fallback (Simple Line) if no specific renderer found
+            pass
 
-        # Case C: Smart Money (Bar) - 左軸
-        elif ind_id == 'Smart_Money':
-            cols = np.where(y_data >= 0, "#8C5B00", "#006D91")
-            fig.add_hline(y=0, line_width=1, line_color="#555", row=2, col=1)
-            fig.add_trace(go.Bar(
-                x=data['tick_x'], y=y_data, name=f"{ind_id} (>= 5)",
-                marker_color=cols, marker_line_width=0, opacity=0.6, legendrank=2
-            ), row=2, col=1, secondary_y=False)
-
-        # Case D: Whale Nuke (Bar) - 左軸
-        elif ind_id == 'Whale_Nuke':
-            cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF")
-            fig.add_trace(go.Bar(
-                x=data['tick_x'], y=y_data, name=f"{ind_id} (>= 15)",
-                marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3
-            ), row=2, col=1, secondary_y=False)
+    # 4. Volume Profile (Overlay on Row 1)
+    vp = data.get('vp_data')
+    if vp:
+        # Prepare X range for lines
+        x_range = None
+        if len(data['tick_x']) > 0:
+            x_range = (data['tick_x'][0], data['tick_x'][-1])
+            
+        renderers.add_volume_profile(fig, vp, VP_BIN_SIZE, VP_LEGEND_GROUP, x_range=x_range, row=1, col=1)
 
     # =========================================================
     # 🎨 Global Layout Configuration (全局版面設定)
@@ -282,6 +254,7 @@ def build_combined_figure(data):
 
         # --- 4. 條狀圖設定 (Bar Mode) ---
         barmode='overlay',      # 關鍵：允許不同 Bar 重疊而非並排擠壓
+        bargap=0,               # [Fix] Remove gap between bars
 
         # --- 5. Y 軸配置 (Y-Axes Configuration) ---
         # [Axis 1] 主圖價格 (右軸)
@@ -316,6 +289,15 @@ def build_combined_figure(data):
             rangeslider=dict(visible=False),
             range=initial_range if initial_range else None
         ),
+        
+        # [Axis 4] Volume Profile X-Axis (Overlay Top)
+        xaxis3=dict(
+            overlaying='x', # Overlay on main X axis
+            side='top',     # Put labels on top (or hidden)
+            showgrid=False,
+            visible=False,  # Hide axis to reduce clutter
+            matches=None    # Crucial: Do not sync with time axis
+        ),
     )
     
     # =========================================================
@@ -335,5 +317,10 @@ def build_combined_figure(data):
         spikedash='dash',         # 線條樣式：虛線
         spikecolor=UI_COLOR['TEXT_MAIN'], 
     )
+    
+    # [CRITICAL FIX]
+    # update_xaxes(matches='x') is aggressive and overwrites xaxis3.matches.
+    # We must explicitly reset typical overlay axes to None AFTER the global call.
+    fig.update_layout(xaxis3=dict(matches=None))
     
     return fig
