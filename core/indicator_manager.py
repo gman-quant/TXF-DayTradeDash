@@ -28,7 +28,8 @@ class IndicatorManager:
         # ==========================================
         self.history = {
             "timestamp": np.zeros(buffer_capacity, dtype=np.int64),
-            "price": np.zeros(buffer_capacity, dtype=np.int64),
+            "close": np.zeros(buffer_capacity, dtype=np.int64),
+            "volume": np.zeros(buffer_capacity, dtype=np.int64),
         }
         
         # 2. 🆕 多週期 K 線容器
@@ -224,7 +225,8 @@ class IndicatorManager:
         # 3. 更新基礎歷史數據 (直接寫入 Array)
         # ==========================================
         self.history["timestamp"][curr_idx] = time_val
-        self.history["price"][curr_idx]     = close_val
+        self.history["close"][curr_idx]     = close_val
+        self.history["volume"][curr_idx]    = vol_val
         
         # ==========================================
         # 4. 執行 Numba 計算 (直接寫入 Array)

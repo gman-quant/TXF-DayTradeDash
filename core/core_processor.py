@@ -34,6 +34,14 @@ class CoreSupervisor:
                "--group", self.args.group,
                "--topic", self.args.topic]
         
+        # [Restored] Pass History Mode Args
+        if self.args.mode == 'history':
+            cmd.extend(["--mode", "history"])
+            if self.args.date:
+                cmd.extend(["--date", self.args.date])
+            if self.args.session:
+                cmd.extend(["--session", self.args.session])
+        
         logger.info(f"Starting Ingestion Process: {' '.join(cmd)}")
         self.ingest_process = subprocess.Popen(cmd)
 
@@ -93,6 +101,11 @@ if __name__ == "__main__":
     parser.add_argument('--broker', type=str, default='192.168.1.50:9092')
     parser.add_argument('--group', type=str, default='gale_v1_unified')
     parser.add_argument('--topic', type=str, default='txf-tick')
+    
+    # [Restored] History Mode Arguments
+    parser.add_argument('--mode', type=str, default='live', choices=['live', 'history'])
+    parser.add_argument('--date', type=str, help='YYYY-MM-DD for history mode')
+    parser.add_argument('--session', type=str, default='day', choices=['day', 'night'])
     
     args = parser.parse_args()
     

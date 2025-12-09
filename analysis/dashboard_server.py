@@ -144,9 +144,9 @@ def start_dashboard_server(indicator_manager, port=8050):
             hist = data_pack['history']
             
             # 安全取得 OHLC (避免剛啟動時數據不足)
-            if len(hist['price']) > 0:
-                last_price = hist['price'][-1]
-                open_p = hist['price'][0]
+            if len(hist['close']) > 0:
+                last_price = hist['close'][-1]
+                open_p = hist['close'][0]
             else:
                 last_price = PREV_CLOSE_PRICE
                 open_p = PREV_CLOSE_PRICE

@@ -117,6 +117,23 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
     for key in indicator_manager.history:
         view_history[key] = indicator_manager.get_linear_snapshot(key)
 
+    # [NEW] VWAP Bands Calculation (On-the-fly)
+    # Since we don't have cum_pv_sq in RingBuffer, we calc from linear history.
+    if 'close' in view_history and 'volume' in view_history:
+        import core.numba_engine as ne
+        close_arr = view_history['close']
+        vol_arr = view_history['volume']
+        
+        # Calculate +2.0 SD Bands
+        vwap, upper, lower = ne.calc_vwap_bands_linear(close_arr, vol_arr, 2.0)
+        
+        # Inject into history so renderers can find it
+        # Note: 'Session_VWAP' might already exist from RingBuffer, 
+        # but recalculating it ensures consistency with Bands.
+        # Let's trust the Band calculation for the bands, but keep original VWAP.
+        view_history['VWAP_Upper'] = upper
+        view_history['VWAP_Lower'] = lower
+
     # 7. 計算預設縮放範圍 (Auto-Range)
     if len(tick_x_axis) > 0:
         last_visible_ts = timestamps_slice[-1]
@@ -185,8 +202,22 @@ def build_combined_figure(data):
 
     # 2. Overlays (Row 1)
     # Default OFF (Legend Only)
-    DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60']
+    DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60', 'Max_250', 'Min_250']
     
+    # [NEW] VWAP Bands Rendering
+    # Manually added since they are not in config.indicator_config
+    if 'VWAP_Upper' in data['history']:
+        # Upper Band
+        renderers.add_overlay_indicator(fig, data, {
+            'id': 'VWAP_Upper', 'color': '#008692', 'style': 'dash',
+            'legendgroup': 'VWAP_Group'
+        }, row=1, col=1)
+        # Lower Band
+        renderers.add_overlay_indicator(fig, data, {
+            'id': 'VWAP_Lower', 'color': '#008692', 'style': 'dash',
+            'legendgroup': 'VWAP_Group'
+        }, row=1, col=1)
+
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
             # Start count

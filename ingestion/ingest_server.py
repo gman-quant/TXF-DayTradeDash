@@ -54,18 +54,38 @@ class IngestServer:
         """Main Loop"""
         self.consumer.connect()
         
-        # 🛑 邏輯修正：自動 Seek 到當前盤別的開盤點
-        # 這樣才能確保從開盤開始的資料都有被寫入，而不只是從現在開始
-        start_offset, session_status = get_current_session_offset()
-        logger.info(f"Session Check: Status={session_status}, StartOffset={start_offset}")
-
-        if session_status == 'CLOSED':
-             logger.warning("Market is currently CLOSED. Waiting for new data...")
+        if self.args.mode == 'history':
+            # [History Mode] Seek to specific historical session
+            from config.txf_calendar import get_history_range
+            if not self.args.date:
+                 logger.error("History mode requires --date YYYY-MM-DD")
+                 sys.exit(1)
+            
+            start_offset, end_offset = get_history_range(self.args.date, self.args.session)
+            logger.info(f"🕰 Time Machine Mode: Replaying {self.args.date} ({self.args.session})")
+            logger.info(f"Target Range: {start_offset} -> {end_offset}")
+            
+            try:
+                self.consumer.seek_to_time(start_offset)
+                # Note: We don't limit end time here, but we could add logic in the loop to stop.
+                # For now, let's assume it just plays until end of available data for that day.
+            except Exception as e:
+                logger.error(f"Failed to seek history: {e}")
+                
         else:
-             try:
-                 self.consumer.seek_to_time(start_offset)
-             except Exception as e:
-                 logger.error(f"Failed to seek: {e}")
+            # [Live Mode]
+            # 🛑 邏輯修正：自動 Seek 到當前盤別的開盤點
+            # 這樣才能確保從開盤開始的資料都有被寫入，而不只是從現在開始
+            start_offset, session_status = get_current_session_offset()
+            logger.info(f"Session Check: Status={session_status}, StartOffset={start_offset}")
+    
+            if session_status == 'CLOSED':
+                 logger.warning("Market is currently CLOSED. Waiting for new data...")
+            else:
+                 try:
+                     self.consumer.seek_to_time(start_offset)
+                 except Exception as e:
+                     logger.error(f"Failed to seek: {e}")
         
         logger.info("🚀 Ingestion Server (Writer) Started...")
         
@@ -78,10 +98,24 @@ class IngestServer:
                 
                 # Parse all messages in batch
                 valid_ticks = []
+                reached_history_end = False
+                
+                # Pre-calc end timestamp if in history mode
+                end_ts_ms = None
+                if self.args.mode == 'history' and 'end_offset' in locals():
+                    end_ts_ms = int(end_offset.timestamp() * 1000)
+
                 for raw_bytes in batch_msgs:
                     try:
                         t = Tick()
                         t.ParseFromString(raw_bytes)
+                        
+                        # [History Mode] Check End Time
+                        if end_ts_ms and t.timestamp_ms > end_ts_ms:
+                            reached_history_end = True
+                            logger.info(f"🛑 Reached session end time: {end_offset}. Stopping ingestion.")
+                            break
+                            
                         valid_ticks.append(t)
                         processed_count += 1
                     except Exception as e:
@@ -95,6 +129,16 @@ class IngestServer:
                 n_batch = len(valid_ticks)
                 if n_batch > 0 and (processed_count % 10000 < n_batch):
                      logger.info(f"Written batch {n_batch} ticks. Total: {processed_count}. Latest: {valid_ticks[-1].close/10000.0}")
+                
+                # If we reached the end, stop the consumer loop but keep process alive
+                if reached_history_end:
+                    logger.info("✅ History Replay Completed. Keeping Shared Memory alive for analysis...")
+                    # Close consumer to release network resources
+                    self.consumer.close()
+                    # Enter Keep-Alive Loop
+                    while self.running:
+                        await asyncio.sleep(1)
+                    break # Exit normally if running becomes False
                     
         except asyncio.CancelledError:
             logger.info("Ingestion task cancelled.")
@@ -117,6 +161,11 @@ if __name__ == "__main__":
     parser.add_argument('--broker', type=str, default='192.168.1.50:9092')
     parser.add_argument('--group', type=str, default='gale_ingest_v1')
     parser.add_argument('--topic', type=str, default='txf-tick')
+    
+    # [Restored] History Mode Arguments
+    parser.add_argument('--mode', type=str, default='live', choices=['live', 'history'])
+    parser.add_argument('--date', type=str, help='YYYY-MM-DD for history mode')
+    parser.add_argument('--session', type=str, default='day', choices=['day', 'night'])
     
     args = parser.parse_args()
     

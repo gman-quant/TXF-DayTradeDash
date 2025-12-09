@@ -46,11 +46,18 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     # But to keep it pure, let's just render what is asked.
     # We can pass 'visible' as a kwarg if needed.
     
-    fig.add_trace(go.Scattergl(
+    trace_kwargs = dict(
         x=data['tick_x'], y=y_data, mode='lines', name=ind_id,
         line=dict(color=ind_config['color'], width=1, dash=ind_config.get('style', 'solid')),
-        # visible state is managed by caller or defaults to True
-    ), row=row, col=col)
+    )
+    
+    # Optional Legend Group
+    if 'legendgroup' in ind_config:
+        trace_kwargs['legendgroup'] = ind_config['legendgroup']
+        # If part of a group, we might want to toggle together.
+        # Plotly default behavior: if legendgroup is set, clicking one toggles all in group.
+    
+    fig.add_trace(go.Scattergl(**trace_kwargs), row=row, col=col)
 
 def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1, col=1):
     """

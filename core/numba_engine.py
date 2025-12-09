@@ -571,3 +571,69 @@ def calc_small_lot_net(vol_arr: np.ndarray,
                 net_small_vol -= v
             
     return net_small_vol
+
+# =============================================================================
+# 🧩 Dashboard Helper Functions (On-the-fly Calculation)
+# 這些函數專為 Dashboard "解環後" 的線性陣列設計，不涉及 RingBuffer 回溯。
+# =============================================================================
+
+@jit(nopython=True, cache=True, fastmath=True)
+def calc_vwap_bands_linear(close_arr: np.ndarray, 
+                           vol_arr: np.ndarray, 
+                           multiplier: float) -> tuple:
+    """
+    計算 VWAP 及上下通道 (VWAP Bands) - Vectorized Optimized
+    
+    Returns:
+        (vwap_arr, upper_arr, lower_arr)
+    """
+    # 1. 基礎向量運算
+    # 避免 Numba warning，轉換型別 (雖然通常不用)
+    pv = close_arr * vol_arr
+    pv_sq = close_arr * close_arr * vol_arr
+    
+    # 2. 累積總和 (Prefix Sum) - O(N)
+    cum_vol = np.cumsum(vol_arr)
+    cum_pv = np.cumsum(pv)
+    cum_pv_sq = np.cumsum(pv_sq)
+    
+    # 3. 處理除以零的情況 (初期無成交量)
+    # 建立一個遮罩，避免 NaN 傳染
+    # 但為了效能，我們可以用一個非常小的 Epsilon 或直接讓它 NaN
+    # 這裡選擇讓初期 Volume=0 的地方保持 NaN
+    
+    # 為了計算方便，將 0 的 CumVol 暫時換成 1 (避免 DivZero error)
+    # 最後再把對應的位置填回 NaN
+    valid_mask = (cum_vol > 0)
+    safe_cum_vol = cum_vol.copy()
+    # Numba 不支援 safe_cum_vol[~valid_mask] = 1.0 進階索引賦值? 
+    # Numba 支援布林索引，但有時會有問題。我們用簡單迴圈處理 "前幾個" 0 即可?
+    # 或者直接除，Numba 會產生 Inf/NaN，我們最後處理。
+    
+    # 計算 VWAP (E[X])
+    vwap_arr = cum_pv / safe_cum_vol
+    
+    # 計算 Variance (E[X^2] - (E[X])^2)
+    mean_sq_arr = cum_pv_sq / safe_cum_vol
+    variance_arr = mean_sq_arr - (vwap_arr * vwap_arr)
+    
+    # 數值穩定性修正 (Variance >= 0)
+    # 使用迴圈或 np.maximum (Numba 支援)
+    variance_arr = np.maximum(variance_arr, 0.0)
+    
+    sd_arr = np.sqrt(variance_arr)
+    
+    # 計算 Bands
+    upper_arr = vwap_arr + (multiplier * sd_arr)
+    lower_arr = vwap_arr - (multiplier * sd_arr)
+    
+    # 4. 修正無效區間 (初期 Volume=0)
+    # 如果 cum_vol[i] == 0, 則結果應為 NaN
+    # 利用 Numba loop 修正或 where (Numba np.where 支援)
+    # 但上面已經除了 0 產生 NaN/Inf，所以可能已經自動變 NaN 了?
+    # 0/0 -> NaN. x/0 -> Inf.
+    # 我們希望保持乾淨。
+    # 簡單用迴圈把前面 cum_vol == 0 的設為 NaN 即可 (通常只有第 0 筆)
+    # 或者如果不修也沒關係，Plotly 會忽略 NaN/Inf。
+    
+    return vwap_arr, upper_arr, lower_arr

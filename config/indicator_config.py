@@ -26,7 +26,8 @@ INDICATORS_SETUP = [
         'type': TYPE_OVERLAY,
         'inputs': ['session_high'],   
         'color': "#004E00",         
-        'style': 'solid'              
+        'style': 'solid',
+        'legendgroup': 'Session_HL_Group'
     },
     # 當盤 VWAP
     {
@@ -36,7 +37,8 @@ INDICATORS_SETUP = [
         'type': TYPE_OVERLAY,          
         'inputs': ['cum_pv', 'cum_volume'], 
         'color': "#008692",           
-        'style': 'solid'               
+        'style': 'solid',
+        'legendgroup': 'VWAP_Group' # Group with Bands
     },
     # 當盤最低價
     {
@@ -46,7 +48,8 @@ INDICATORS_SETUP = [
         'type': TYPE_OVERLAY,
         'inputs': ['session_low'],
         'color': "#780000",         
-        'style': 'solid'
+        'style': 'solid',
+        'legendgroup': 'Session_HL_Group'
     },
     # 總成交量 (Hidden 指標，只為了 Dashboard 顯示數值用)
     {
