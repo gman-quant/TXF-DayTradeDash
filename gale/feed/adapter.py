@@ -64,10 +64,13 @@ class GaleKafkaConsumer:
             self.logger.info("Kafka Consumer closed.")
 
 
-    async def consume_stream(self, batch_size: int = 500):
+    async def consume_stream(self, batch_size: int = 500, running_check: Callable[[], bool] = None):
         """
         Async Generator: 持續產生訊息列表 (Batch processing)。
         配合外部的 UVLOOP 運行。
+        Args:
+            batch_size: 批次大小
+            running_check: 用於檢查是否該停止迴圈的 callback
         """
         if not self.consumer:
             raise RuntimeError("Consumer not connected.")
@@ -79,6 +82,11 @@ class GaleKafkaConsumer:
 
         try:
             while True:
+                # 每次迴圈開始前檢查是否該停止
+                if running_check and not running_check():
+                    self.logger.info("Running check returned False. Stopping loop.")
+                    break
+                    
                 # 使用 consume 批次獲取，大幅減少 Context Switch
                 # run_in_executor 仍然是必要的，因為 consume 在 C 層面是 blocking 的
                 msgs = await loop.run_in_executor(None, self.consumer.consume, batch_size, 0.1)

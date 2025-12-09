@@ -99,7 +99,7 @@ class IngestServer:
         write_tick = self.ring_buffer.write_tick # Bound method cache
         
         try:
-            async for batch_msgs in self.consumer.consume_stream():
+            async for batch_msgs in self.consumer.consume_stream(running_check=lambda: self.running):
                 if not self.running: break
                 
                 # Parse all messages in batch

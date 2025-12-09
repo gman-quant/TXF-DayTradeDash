@@ -59,16 +59,23 @@ class CoreSupervisor:
                 try:
                     # Construct SQL Query
                     # Logic: 
-                    # 1. Filter session='day' (case insensitive)
-                    # 2. Filter date < target_date (e.g. 2025-12-04: dt range = [2025-12-03 15:00:00, 2025-12-04 13:45:00])
-                    # 3. Order by date DESC
-                    # 4. Limit 1
+                    # 1. Filter session='day' (case insensitive).
+                    # 2. Date Filtering Strategy:
+                    #    - Live Mode (Night Session >= 15:00): Use '<=' to include Today's Day Close.
+                    #    - Live Mode (Day Session) or History: Use '<' to Reference Prev Day Close.
+                    # 3. Order by date DESC (Latest first).
+                    # 4. Limit 1.
+                    
+                    if self.args.mode == 'live' and datetime.now().hour >= 15:
+                        op = '<='
+                    else:
+                        op = '<'
                         
                     query = f"""
                         SELECT close, date
                         FROM '{parquet_path}'
                         WHERE lower(session) = 'day'
-                          AND date < '{target_date_str}'
+                          AND date {op} '{target_date_str}'
                         ORDER BY date DESC
                         LIMIT 1
                     """
