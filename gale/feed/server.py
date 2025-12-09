@@ -6,8 +6,8 @@ import sys
 import argparse
 from datetime import datetime
 from data_schemas.txf_data_pb2 import Tick
-from ingestion.kafka_consumer import GaleKafkaConsumer
-from core.shared_memory import SharedRingBuffer
+from gale.feed.adapter import GaleKafkaConsumer
+from gale.infra.memory import SharedRingBuffer
 from config.txf_calendar import get_current_session_offset
 
 # Try to use uvloop for better performance

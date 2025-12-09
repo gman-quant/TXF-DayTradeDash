@@ -1,10 +1,10 @@
 # core/indicator_manager.py
 
 import numpy as np
-import core.numba_engine as engine
+import gale.alpha.engine as engine
 from config.indicator_config import INDICATORS_SETUP
 from config.settings import TIMEFRAMES
-from core.volume_profile import VolumeProfileEngine
+from gale.alpha.profile import VolumeProfileEngine
 
 class IndicatorManager:
     """

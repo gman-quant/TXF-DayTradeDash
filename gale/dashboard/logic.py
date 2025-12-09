@@ -120,7 +120,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
     # [NEW] VWAP Bands Calculation (On-the-fly)
     # Since we don't have cum_pv_sq in RingBuffer, we calc from linear history.
     if 'close' in view_history and 'volume' in view_history:
-        import core.numba_engine as ne
+        import gale.alpha.engine as ne
         close_arr = view_history['close']
         vol_arr = view_history['volume']
         
@@ -195,7 +195,7 @@ def build_combined_figure(data):
     # =========================================================
     # 📉 Chart Renderers (Modularized)
     # =========================================================
-    import analysis.chart_renderers as renderers
+    import gale.dashboard.renderers as renderers
 
     # 1. Main Chart (Row 1)
     renderers.add_main_price_chart(fig, data, row=1, col=1)

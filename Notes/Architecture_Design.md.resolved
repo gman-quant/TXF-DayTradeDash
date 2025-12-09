@@ -1,0 +1,77 @@
+# Gale Engine V1.0 Architecture Design
+
+## 1. Design Philosophy (設計哲學)
+
+A professional Quantitative Trading System should follow the **Separation of Concerns** principle.
+Professional architecture distinguishes between:
+1.  **Infrastructure (Infra)**: Low-level memory management, IPC.
+2.  **Data (Feed)**: Ingestion, parsing, normalization.
+3.  **Alpha (Signal)**: Pure mathematical calculation, indicators.
+4.  **Strategy (Execution)**: Signal interpretation, order management.
+5.  **Interface (UI)**: Visualization, manual control.
+
+## 2. Proposed Directory Structure (檔案結構建議)
+
+We propose moving from the current "Flat Core" structure to a "Modular Package" structure.
+
+```
+txf-gale-engine/
+├── bin/                       # 🚀 Entry Points (Launchers)
+│   ├── start_engine.py        # (Old: core_processor.py)
+│   ├── start_dashboard.py     # (Old: dashboard_runner.py)
+│   └── start_feed.py          # (Old: ingestion_server direct launch)
+│
+├── gale/                      # 📦 Main Python Package
+│   ├── __init__.py
+│   │
+│   ├── infra/                 # 🏗 Infrastructure Layer
+│   │   ├── memory.py          # (Old: shared_memory.py)
+│   │   └── ring.py            # (Old: ring_buffer.py)
+│   │
+│   ├── feed/                  # 🌊 Data Layer
+│   │   ├── adapter.py         # (Old: kafka_consumer.py)
+│   │   └── server.py          # (Old: ingest_server.py)
+│   │
+│   ├── alpha/                 # 🧠 Alpha / Signal Layer
+│   │   ├── engine.py          # (Old: numba_engine.py) - Pure Math
+│   │   ├── filters.py         # (Old: indicator_manager.py functionality)
+│   │   └── profile.py         # (Old: volume_profile.py)
+│   │
+│   ├── strategy/              # ⚔️ Execution Layer
+│   │   ├── engine.py          # (Old: strategy_server.py)
+│   │   └── paper.py           # (New: Paper Trading simulation)
+│   │
+│   └── dashboard/             # 📊 UI Layer (Old: analysis/)
+│       ├── server.py
+│       ├── layout.py
+│       ├── renderers.py
+│       └── logic.py
+│
+├── config/                    # ⚙️ Configuration
+│   ├── settings.py
+│   ├── indicators.py
+│   └── calendar.py
+│
+└── data_schemas/              # 📝 Protobuf Schemas
+    └── txf_data_pb2.py
+```
+
+## 3. Benefits (效益)
+
+1.  **Clear Boundaries**: `alpha` layer doesn't need to know about `kafka`. [strategy](file:///Users/gtai/Projects/txf-gale-engine/core/core_processor.py#56-62) doesn't worry about `ring_buffer` implementation details.
+2.  **Scalability**: Easier to add new strategies in `gale/strategy/` without touching the core engine.
+3.  **Deployability**: [bin/](file:///Users/gtai/Projects/txf-gale-engine/analysis/dash_logic.py#177-358) scripts are clearly separated from library code, making deployment straightforward.
+
+## 4. Migration Plan (遷移計畫) in 3 Stages
+
+### Stage 1: Renaming & Grouping (Immediate)
+*   Create [bin/](file:///Users/gtai/Projects/txf-gale-engine/analysis/dash_logic.py#177-358) and move runners there.
+*   Rename `analysis` to `gale/dashboard`.
+*   Keep `core` but clean it up.
+
+### Stage 2: Deep Modularization (Recommended Next Step)
+*   Refactor `core` into `gale/infra` and `gale/alpha`.
+*   Update all imports.
+
+### Stage 3: Feature Expansion
+*   Add `gale/strategy/paper.py`.

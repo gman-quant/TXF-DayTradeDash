@@ -6,7 +6,7 @@ import signal
 import time
 import argparse
 import logging
-from core.strategy_server import StrategyServer
+from gale.strategy.engine import StrategyServer
 
 # Logging
 logging.basicConfig(
@@ -29,7 +29,7 @@ class CoreSupervisor:
         
     def start_ingestion(self):
         """啟動 Ingestion Process (獨立進程)"""
-        cmd = [sys.executable, "-m", "ingestion.ingest_server", 
+        cmd = [sys.executable, "-m", "gale.feed.server", 
                "--broker", self.args.broker,
                "--group", self.args.group,
                "--topic", self.args.topic]
@@ -47,7 +47,7 @@ class CoreSupervisor:
 
     def start_dashboard(self):
         """啟動 Dashboard Process (獨立進程)"""
-        cmd = [sys.executable, "-m", "core.dashboard_runner", 
+        cmd = [sys.executable, "-m", "bin.start_dashboard", 
                "--topic", self.args.topic]
         
         logger.info(f"Starting Dashboard Process: {' '.join(cmd)}")
@@ -56,7 +56,7 @@ class CoreSupervisor:
     def start_strategy(self):
         """啟動 Strategy Logic (直接在當前進程跑)"""
         # 未來也可以改成 subprocess，但目前保留在 Main Process 方便 Debug
-        from core.strategy_server import StrategyServer
+        from gale.strategy.engine import StrategyServer
         server = StrategyServer(self.args)
         server.run()
 

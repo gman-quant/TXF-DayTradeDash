@@ -8,8 +8,8 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 # --- Local Modules ---
-from analysis.dash_layout import create_main_layout, create_scoreboard_html
-from analysis.dash_logic import (
+from gale.dashboard.layout import create_main_layout, create_scoreboard_html
+from gale.dashboard.logic import (
     create_blank_figure, 
     process_market_data, 
     build_combined_figure, 

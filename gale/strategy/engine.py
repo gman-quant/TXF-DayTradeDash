@@ -4,9 +4,8 @@ import sys
 import logging
 import threading
 import argparse
-from core.shared_memory import SharedRingBuffer
-from core.indicator_manager import IndicatorManager
-from core.indicator_manager import IndicatorManager
+from gale.infra.memory import SharedRingBuffer
+from gale.alpha.handler import IndicatorManager
 
 # Logging
 logging.basicConfig(

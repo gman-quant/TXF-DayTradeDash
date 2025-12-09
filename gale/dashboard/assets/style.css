@@ -1,19 +1,24 @@
-/* assets/style.css */
-
+/* Global Reset */
 body {
-    background-color: #111111; /* 強制背景全黑 */
-    color: #ffffff;            /* 預設文字顏色 */
-    margin: 0;                 /* 去除瀏覽器預設邊距 (白邊) */
+    margin: 0;
     padding: 0;
-    font-family: Arial, sans-serif;
+    background-color: #111111;
+    /* BG_MAIN */
+    color: #FFFFFF;
+    /* TEXT_MAIN */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll */
 }
 
-/* 讓 React 入口點也撐滿高度 */
+/* Ensure root layout takes full height */
 #react-entry-point {
     height: 100vh;
 }
 
-/* 2. Dropdown (React-Select) 深色模式覆寫 */
+/* =========================================================================
+   React-Select Dark Mode Overrides (From old style.css)
+   ========================================================================= */
 
 /* 下拉選單的主體框 (未展開時) */
 .Select-control {
@@ -50,6 +55,6 @@ body {
 }
 
 /* 移除輸入游標的白色背景 */
-.Select-input > input {
+.Select-input>input {
     color: white !important;
 }

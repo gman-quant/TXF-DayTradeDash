@@ -3,7 +3,7 @@ import numpy as np
 import logging
 from multiprocessing.shared_memory import SharedMemory
 from data_schemas.txf_data_pb2 import Tick
-from core.ring_buffer import TxfRingBuffer
+
 
 class SharedRingBuffer:
     """

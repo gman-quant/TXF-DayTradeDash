@@ -4,9 +4,9 @@ import logging
 import threading
 import argparse
 import signal
-from core.shared_memory import SharedRingBuffer
-from core.indicator_manager import IndicatorManager
-from analysis.dashboard_server import start_dashboard_server
+from gale.infra.memory import SharedRingBuffer
+from gale.alpha.handler import IndicatorManager
+from gale.dashboard.server import start_dashboard_server
 
 # Logging
 logging.basicConfig(
