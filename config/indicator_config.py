@@ -31,8 +31,8 @@ INDICATORS_SETUP = [
     },
     # 當盤 VWAP
     {
-        'id': 'Session_VWAP',
-        'func': 'calc_session_vwap',   
+        'id': 'VWAP',
+        'func': 'calc_vwap',   
         'args': [0],                   
         'type': TYPE_OVERLAY,          
         'inputs': ['cum_pv', 'cum_volume'], 

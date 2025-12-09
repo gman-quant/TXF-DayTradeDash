@@ -29,7 +29,7 @@ def get_current_value(data_array: np.ndarray,
     return val
 
 @jit(nopython=True, cache=True, fastmath=True)
-def calc_session_vwap(cum_pv: np.ndarray, 
+def calc_vwap(cum_pv: np.ndarray, 
                       cum_vol: np.ndarray, 
                       head: int, 
                       period: int, # 為了符合介面規範保留，實際上沒用到

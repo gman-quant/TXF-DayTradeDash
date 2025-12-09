@@ -6,6 +6,8 @@ import threading
 import argparse
 from gale.infra.memory import SharedRingBuffer
 from gale.alpha.handler import IndicatorManager
+from gale.strategy.position import PositionManager
+from gale.strategy.strategies.chop_reversal import ChopReversalStrategy
 
 # Logging
 logging.basicConfig(
@@ -36,6 +38,13 @@ class StrategyServer:
         # 2. Initialize Indicator Manager
         # IndicatorManager 會配置自己的 Local Memory 來存放指標計算結果 (RSI, MA...)
         self.manager = IndicatorManager(buffer_capacity=200000)
+        
+        # 3. Initialize Position Manager (Paper Trading)
+        # 用於模擬下單與損益計算
+        self.pos_manager = PositionManager()
+        
+        # 4. Initialize Modular Strategy
+        self.strategy = ChopReversalStrategy(self.pos_manager)
         
         # 追蹤處理進度
         self.local_cursor = 0
@@ -91,6 +100,29 @@ class StrategyServer:
                         
                         on_tick(synthetic_snap)
                         
+                        # [Paper Trading] Update P&L
+                        # Retrieve the close price we just processed (from manager history or shared mem)
+                        # We know 'curr_idx' inside manager is 'next_cursor - 1'
+                        # But simpler: read from shared memory directly
+                        current_close = snap[0][next_cursor-1] # 0 is close array
+                        
+                        self.pos_manager.update_market_price('TXF', current_close)
+                        
+                        # --- 策略邏輯 (Modular Strategy) ---
+                        # 1. Prepare Data
+                        idx = next_cursor - 1
+                        market_data = {
+                            'close': current_close
+                        }
+                        indicators = {
+                            'velocity': self.manager.history['velocity'][idx],
+                            'imbalance': self.manager.history['imbalance'][idx]
+                        }
+                        
+                        # 2. Delegate to Strategy
+                        # timestamp is approximate, real simulation would use tick timestamp
+                        self.strategy.on_tick(time.time(), market_data, indicators)
+
                         # 前進一步
                         self.local_cursor = next_cursor
                     

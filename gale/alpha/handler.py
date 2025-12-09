@@ -5,6 +5,7 @@ import gale.alpha.engine as engine
 from config.indicator_config import INDICATORS_SETUP
 from config.settings import TIMEFRAMES
 from gale.alpha.profile import VolumeProfileEngine
+from gale.alpha.microstructure import MicrostructureEngine
 
 class IndicatorManager:
     """
@@ -44,8 +45,13 @@ class IndicatorManager:
             }
             self.current_candles[tf_name] = {}
 
-        # 2.5 Initialize Volume Profile Engine
+        # 2.5 Initialize Volume Profile & Microstructure Engines
         self.vp_engine = VolumeProfileEngine()
+        self.micro_engine = MicrostructureEngine(window_seconds=3) # 3-second window
+        
+        # Add new metrics to history
+        self.history['velocity'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['imbalance'] = np.zeros(buffer_capacity, dtype=np.float64)
 
         # ==========================================
         # 3. ⚡️ 預先綁定 (Pre-binding) 邏輯
@@ -250,5 +256,19 @@ class IndicatorManager:
         # 6. 更新 Volume Profile (Thread-Safe Update)
         # ==========================================
         self.vp_engine.update(close_val, vol_val)
+        
+        # ==========================================
+        # 7. 更新 Microstructure (Velocity & Imbalance)
+        # ==========================================
+        # type=1 (Buy), type=2 (Sell). 
+        # Need to fetch type from snapshot!
+        type_val = snapshot_tuple[2][curr_idx]
+        
+        self.micro_engine.update(time_val, vol_val, type_val)
+        vel, imb = self.micro_engine.get_metrics()
+        
+        # Store in history for plotting/strategy
+        self.history['velocity'][curr_idx] = vel
+        self.history['imbalance'][curr_idx] = imb
         
         

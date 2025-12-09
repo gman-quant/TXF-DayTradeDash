@@ -11,7 +11,7 @@ from config.ui_theme import UI_COLOR
 from config.settings import TIMEFRAMES
 
 VP_LEGEND_GROUP = "Volume_Profile"
-VP_BIN_SIZE = 10
+VP_BIN_SIZE = 1
 
 # =============================================================================
 # 🛠️ Helper Functions (輔助工具)
@@ -128,7 +128,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         vwap, upper, lower = ne.calc_vwap_bands_linear(close_arr, vol_arr, 2.0)
         
         # Inject into history so renderers can find it
-        # Note: 'Session_VWAP' might already exist from RingBuffer, 
+        # Note: 'VWAP' might already exist from RingBuffer, 
         # but recalculating it ensures consistency with Bands.
         # Let's trust the Band calculation for the bands, but keep original VWAP.
         view_history['VWAP_Upper'] = upper

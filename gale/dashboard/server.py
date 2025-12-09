@@ -174,7 +174,7 @@ def start_dashboard_server(indicator_manager, port=8050):
                 high = get_last_value(hist, 'Session_High'),
                 low  = get_last_value(hist, 'Session_Low'),
                 vol  = get_last_value(hist, 'Total_Vol'),
-                vwap = get_last_value(hist, 'Session_VWAP'),
+                vwap = get_last_value(hist, 'VWAP'),
                 prev_close = current_prev_close,
                 underlying_price = get_last_value(hist, 'Underlying_Price')
             )
