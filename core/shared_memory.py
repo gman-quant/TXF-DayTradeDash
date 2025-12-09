@@ -202,7 +202,10 @@ class SharedRingBuffer:
         price_arr = np.array([t.close / 10000.0 for t in ticks], dtype=np.float64)
         vol_arr = np.array([t.volume for t in ticks], dtype=np.int32)
         type_arr = np.array([t.tick_type for t in ticks], dtype=np.int32)
-        # Others if needed... but let's stick to core logic
+        
+        # [Fix] Add missing fields
+        total_vol_arr = np.array([t.total_volume for t in ticks], dtype=np.int64)
+        underlying_arr = np.array([t.underlying_price / 10000.0 for t in ticks], dtype=np.float64)
         
         # 2. 計算累積數據 (Vectorized Cumulative)
         # 需要取得當前 Buffer 裡 "上一筆" 的累積值
@@ -269,6 +272,10 @@ class SharedRingBuffer:
             self.volume[current_head:end] = vol_arr
             self.tick_type[current_head:end] = type_arr
             
+            # [Fix] Write missing fields
+            self.total_volume[current_head:end] = total_vol_arr
+            self.underlying_price[current_head:end] = underlying_arr
+            
             # Cumulative Arrays
             self.cum_volume[current_head:end] = batch_cum_vol
             self.cum_pv[current_head:end] = batch_cum_pv
@@ -299,6 +306,10 @@ class SharedRingBuffer:
             self.volume[current_head:] = vol_arr[:first_len]
             self.tick_type[current_head:] = type_arr[:first_len]
             
+            # [Fix] Write missing fields (Chunk 1)
+            self.total_volume[current_head:] = total_vol_arr[:first_len]
+            self.underlying_price[current_head:] = underlying_arr[:first_len]
+            
             self.cum_volume[current_head:] = batch_cum_vol[:first_len]
             self.cum_pv[current_head:] = batch_cum_pv[:first_len]
             self.cum_close[current_head:] = batch_cum_close[:first_len]
@@ -316,6 +327,10 @@ class SharedRingBuffer:
             self.volume[:remain_len] = vol_arr[first_len:]
             self.tick_type[:remain_len] = type_arr[first_len:]
             
+            # [Fix] Write missing fields (Chunk 2)
+            self.total_volume[:remain_len] = total_vol_arr[first_len:]
+            self.underlying_price[:remain_len] = underlying_arr[first_len:]
+
             self.cum_volume[:remain_len] = batch_cum_vol[first_len:]
             self.cum_pv[:remain_len] = batch_cum_pv[first_len:]
             self.cum_close[:remain_len] = batch_cum_close[first_len:]
