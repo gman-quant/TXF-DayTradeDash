@@ -144,16 +144,27 @@ def start_dashboard_server(indicator_manager, port=8050):
             hist = data_pack['history']
             
             # 安全取得 OHLC (避免剛啟動時數據不足)
+            # [New] Get PREV_CLOSE_PRICE from SHM Header
+            try:
+                # ring_buffer is dynamically attached in DashboardRunner
+                shm_prev_close = getattr(indicator_manager, 'ring_buffer', None).prev_close
+                if shm_prev_close and shm_prev_close > 0:
+                    current_prev_close = shm_prev_close
+                else:
+                    current_prev_close = PREV_CLOSE_PRICE
+            except Exception:
+                current_prev_close = PREV_CLOSE_PRICE
+
             if len(hist['close']) > 0:
                 last_price = hist['close'][-1]
                 open_p = hist['close'][0]
             else:
-                last_price = PREV_CLOSE_PRICE
-                open_p = PREV_CLOSE_PRICE
+                last_price = current_prev_close
+                open_p = current_prev_close
             
             # 計算漲跌幅
-            change = last_price - PREV_CLOSE_PRICE
-            change_pct = (change / PREV_CLOSE_PRICE * 100) if PREV_CLOSE_PRICE else 0
+            change = last_price - current_prev_close
+            change_pct = (change / current_prev_close * 100) if current_prev_close else 0
 
             scoreboard = create_scoreboard_html(
                 last_price = last_price,
@@ -164,7 +175,7 @@ def start_dashboard_server(indicator_manager, port=8050):
                 low  = get_last_value(hist, 'Session_Low'),
                 vol  = get_last_value(hist, 'Total_Vol'),
                 vwap = get_last_value(hist, 'Session_VWAP'),
-                prev_close = PREV_CLOSE_PRICE,
+                prev_close = current_prev_close,
                 underlying_price = get_last_value(hist, 'Underlying_Price')
             )
 

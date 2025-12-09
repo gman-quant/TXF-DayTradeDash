@@ -38,6 +38,7 @@ class DashboardRunner:
         # 2. Initialize Indicator Manager (Independent Instance)
         # 這裡會維護一份自己的指標運算狀態，與 Strategy 分開
         self.manager = IndicatorManager(buffer_capacity=200000)
+        self.manager.ring_buffer = self.ring_buffer # [New] Attach for access to metadata (prev_close)
         self.local_cursor = 0
 
     def _sync_loop(self):

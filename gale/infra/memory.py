@@ -107,6 +107,7 @@ class SharedRingBuffer:
         # 初始化 Head View (Int64 Array of size 1)
         self.head_view = np.ndarray((1,), dtype=np.int64, buffer=self.shm.buf, offset=0)
         self.full_view = np.ndarray((1,), dtype=np.int64, buffer=self.shm.buf, offset=8) # 用 int64 存 bool 方便
+        self.prev_close_view = np.ndarray((1,), dtype=np.float64, buffer=self.shm.buf, offset=16) # Offset 16: Prev Close
 
     @property
     def head(self):
@@ -123,6 +124,18 @@ class SharedRingBuffer:
     @is_full.setter
     def is_full(self, value):
         self.full_view[0] = 1 if value else 0
+
+    @property
+    def prev_close(self):
+        """Reference Price (Yesterday's Close) stored in Header Offset 16"""
+        # Create a temporary view or cache the view in __init__?
+        # Better to cache the view in __init__ for performance, but this is accessed infrequent (dashboard update).
+        # Let's add view in __init__
+        return self.prev_close_view[0]
+
+    @prev_close.setter
+    def prev_close(self, value):
+        self.prev_close_view[0] = value
 
     def write_tick(self, tick: Tick):
         """

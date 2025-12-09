@@ -6,6 +6,8 @@ import signal
 import time
 import argparse
 import logging
+from datetime import datetime
+
 from gale.strategy.engine import StrategyServer
 
 # Logging
@@ -27,12 +29,81 @@ class CoreSupervisor:
         self.strategy_server = None
         self.dash_process = None
         
+    def _load_prev_close(self):
+        """
+        Auto-loads the previous day's closing price for TXF from a parquet file.
+        Optimized version using DuckDB for zero-copy querying.
+        """
+        prev_close = 0.0
+        try:
+            import duckdb
+            
+            target_date_str = self.args.date if self.args.mode == 'history' else datetime.now().strftime('%Y-%m-%d')
+            target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
+            
+            logger.info(f"🔎 Looking up Prev Close for {target_date_str} (DuckDB)...")
+            
+            # Strategy: Check current year, then previous year
+            years_to_check = [target_dt.year, target_dt.year - 1]
+            found = False
+            
+            BASE_PATH = "/Users/gtai/Projects/txf-data-lake/data/kbars/1d/TXF"
+            
+            for year in years_to_check:
+                parquet_path = f"{BASE_PATH}/TXF_1d_{year}.parquet"
+                
+                if not os.path.exists(parquet_path):
+                    continue
+                    
+                logger.debug(f"📖 Checking file: {parquet_path}")
+                try:
+                    # Construct SQL Query
+                    # Logic: 
+                    # 1. Filter session='day' (case insensitive)
+                    # 2. Filter date < target_date (e.g. 2025-12-04: dt range = [2025-12-03 15:00:00, 2025-12-04 13:45:00])
+                    # 3. Order by date DESC
+                    # 4. Limit 1
+                        
+                    query = f"""
+                        SELECT close, date
+                        FROM '{parquet_path}'
+                        WHERE lower(session) = 'day'
+                          AND date < '{target_date_str}'
+                        ORDER BY date DESC
+                        LIMIT 1
+                    """
+                    
+                    result = duckdb.sql(query).fetchone()
+                    
+                    if result:
+                        prev_close = float(result[0])
+                        ref_date = result[1]
+                        logger.info(f"✅ Found Prev Close: {prev_close} (Date: {ref_date}) from TXF_1d_{year}.parquet")
+                        found = True
+                        break
+                        
+                except Exception as e:
+                    logger.warning(f"DuckDB Error reading {parquet_path}: {e}")
+                    continue
+            
+            if not found:
+                logger.warning(f"⚠️ Could not find Prev Close for {target_date_str}")
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load Prev Close: {e}")
+            
+        return prev_close
+
     def start_ingestion(self):
         """啟動 Ingestion Process (獨立進程)"""
+        # [New] Auto Load Prev Close
+        prev_close = self._load_prev_close()
+
         cmd = [sys.executable, "-m", "gale.feed.server", 
                "--broker", self.args.broker,
                "--group", self.args.group,
-               "--topic", self.args.topic]
+               "--topic", self.args.topic,
+               "--prev-close", str(prev_close)] # Pass it
         
         # [Restored] Pass History Mode Args
         if self.args.mode == 'history':

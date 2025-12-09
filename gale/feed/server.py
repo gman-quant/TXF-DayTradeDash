@@ -36,6 +36,12 @@ class IngestServer:
         try:
             self.ring_buffer = SharedRingBuffer(name=self.shm_name, capacity=200000, create=True)
             logger.info(f"✅ Shared Buffer Created: {self.shm_name}")
+            
+            # [New] Write Reference Price to Header
+            if args.prev_close > 0:
+                self.ring_buffer.prev_close = args.prev_close
+                logger.info(f"✅ Set Prev Close Price: {args.prev_close}")
+                
         except Exception as e:
             logger.error(f"Failed to create shared buffer: {e}")
             sys.exit(1)
@@ -166,6 +172,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, default='live', choices=['live', 'history'])
     parser.add_argument('--date', type=str, help='YYYY-MM-DD for history mode')
     parser.add_argument('--session', type=str, default='day', choices=['day', 'night'])
+    parser.add_argument('--prev-close', type=float, default=0.0, help='Reference price (Yesterday Close)')
     
     args = parser.parse_args()
     

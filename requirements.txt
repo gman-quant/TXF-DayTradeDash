@@ -5,3 +5,5 @@ numba==0.62.1
 pandas==2.3.3
 pip==25.1.1
 uvloop==0.22.1
+pyarrow==19.0.0
+duckdb==1.1.3
