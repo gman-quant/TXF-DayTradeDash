@@ -10,13 +10,10 @@ from datetime import datetime
 
 from gale.strategy.engine import StrategyServer
 
+from gale.utils.log_utils import setup_logger
+
 # Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-    stream=sys.stdout
-)
-logger = logging.getLogger("CoreSupervisor")
+logger = setup_logger("Supervisor")
 
 class CoreSupervisor:
     """
@@ -29,77 +26,23 @@ class CoreSupervisor:
         self.strategy_server = None
         self.dash_process = None
         
+
     def _load_prev_close(self):
         """
-        Auto-loads the previous day's closing price for TXF from a parquet file.
-        Optimized version using DuckDB for zero-copy querying.
+        [Refactored] Use Infrastructure Module to load Prev Close.
         """
-        prev_close = 0.0
-        try:
-            import duckdb
+        # 如果是 History Mode，不需要昨收 (或者可以設為 0)
+        # 不過 Ingestion Server 還是可以收，沒 harm
+        target_date_str = self.args.date if self.args.mode == 'history' else datetime.now().strftime('%Y-%m-%d')
+        
+        # Call DB Module with logic based on Time/Mode
+        if self.args.mode == 'live' and datetime.now().hour >= 15:
+            op = '<='
+        else:
+            op = '<'
             
-            target_date_str = self.args.date if self.args.mode == 'history' else datetime.now().strftime('%Y-%m-%d')
-            target_dt = datetime.strptime(target_date_str, '%Y-%m-%d')
-            
-            logger.info(f"🔎 Looking up Prev Close for {target_date_str} (DuckDB)...")
-            
-            # Strategy: Check current year, then previous year
-            years_to_check = [target_dt.year, target_dt.year - 1]
-            found = False
-            
-            BASE_PATH = "/Users/gtai/Projects/txf-data-lake/data/kbars/1d/TXF"
-            
-            for year in years_to_check:
-                parquet_path = f"{BASE_PATH}/TXF_1d_{year}.parquet"
-                
-                if not os.path.exists(parquet_path):
-                    continue
-                    
-                logger.debug(f"📖 Checking file: {parquet_path}")
-                try:
-                    # Construct SQL Query
-                    # Logic: 
-                    # 1. Filter session='day' (case insensitive).
-                    # 2. Date Filtering Strategy:
-                    #    - Live Mode (Night Session >= 15:00): Use '<=' to include Today's Day Close.
-                    #    - Live Mode (Day Session) or History: Use '<' to Reference Prev Day Close.
-                    # 3. Order by date DESC (Latest first).
-                    # 4. Limit 1.
-                    
-                    if self.args.mode == 'live' and datetime.now().hour >= 15:
-                        op = '<='
-                    else:
-                        op = '<'
-                        
-                    query = f"""
-                        SELECT close, date
-                        FROM '{parquet_path}'
-                        WHERE lower(session) = 'day'
-                          AND date {op} '{target_date_str}'
-                        ORDER BY date DESC
-                        LIMIT 1
-                    """
-                    
-                    result = duckdb.sql(query).fetchone()
-                    
-                    if result:
-                        prev_close = float(result[0])
-                        ref_date = result[1]
-                        logger.info(f"✅ Found Prev Close: {prev_close} (Date: {ref_date}) from TXF_1d_{year}.parquet")
-                        found = True
-                        break
-                        
-                except Exception as e:
-                    logger.warning(f"DuckDB Error reading {parquet_path}: {e}")
-                    continue
-            
-            if not found:
-                logger.warning(f"⚠️ Could not find Prev Close for {target_date_str}")
-
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to load Prev Close: {e}")
-            
-        return prev_close
+        from gale.infra.db import load_prev_close
+        return load_prev_close(target_date_str, op=op)
 
     def start_ingestion(self):
         """啟動 Ingestion Process (獨立進程)"""

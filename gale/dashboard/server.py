@@ -10,11 +10,11 @@ from dash.exceptions import PreventUpdate
 # --- Local Modules ---
 from gale.dashboard.layout import create_main_layout, create_scoreboard_html
 from gale.dashboard.logic import (
-    create_blank_figure, 
     process_market_data, 
-    build_combined_figure, 
-    get_last_value
+    build_combined_figure
 )
+from gale.dashboard.chart import create_blank_figure
+from gale.dashboard.state import get_last_value
 
 # --- Configuration ---
 try:

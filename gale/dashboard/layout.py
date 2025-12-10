@@ -5,7 +5,7 @@ from dash import dcc, html
 # --- Local Configuration ---
 from config.ui_theme import UI_COLOR
 from config.settings import TIMEFRAMES, DEFAULT_TIMEFRAME
-from gale.dashboard.logic import create_blank_figure
+from gale.dashboard.chart import create_blank_figure
 
 # =============================================================================
 # 🎨 UI Style Definitions (樣式定義)
