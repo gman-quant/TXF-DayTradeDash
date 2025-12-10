@@ -15,8 +15,7 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     stream=sys.stdout
 )
-# Suppress Werkzeug logs (Dashboard poll spam)
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
 logger = logging.getLogger("StrategyServer")
 
 class StrategyServer:
