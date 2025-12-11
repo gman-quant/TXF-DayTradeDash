@@ -220,11 +220,13 @@ class IndicatorManager:
         curr_idx = head - 1
         if curr_idx < 0: curr_idx = self.capacity - 1
         
-        # 從 snapshot 拿出基礎數據 (直接用 index 取，不做解包變數，省效能)
+        # 从 snapshot 拿出基礎數據 (直接用 index 取，不做解包變數，省效能)
         # index 0=close, 3=time
         close_val = snapshot_tuple[0][curr_idx]
         time_val  = snapshot_tuple[3][curr_idx]
         vol_val   = snapshot_tuple[1][curr_idx]
+        # type=1 (Buy), type=2 (Sell). 
+        type_val = snapshot_tuple[2][curr_idx]
         # print(f"DEBUG: Vol={snapshot_tuple[1][curr_idx]}, Type={snapshot_tuple[2][curr_idx]}")
 
         # ==========================================
@@ -255,15 +257,12 @@ class IndicatorManager:
         # ==========================================
         # 6. 更新 Volume Profile (Thread-Safe Update)
         # ==========================================
-        self.vp_engine.update(close_val, vol_val)
+        
+        self.vp_engine.update(close_val, vol_val, tick_type=type_val)
         
         # ==========================================
         # 7. 更新 Microstructure (Velocity & Imbalance)
         # ==========================================
-        # type=1 (Buy), type=2 (Sell). 
-        # Need to fetch type from snapshot!
-        type_val = snapshot_tuple[2][curr_idx]
-        
         self.micro_engine.update(time_val, vol_val, type_val)
         vel, imb = self.micro_engine.get_metrics()
         

@@ -68,20 +68,30 @@ class VolumeProfileEngine:
         # Index = Price (Points). e.g. Index 15000 means price 15000.
         # TXF price is usually ~20000. 40000 is safe.
         self.histogram = np.zeros(size, dtype=np.int64)
+        self.buy_histogram = np.zeros(size, dtype=np.int64)
+        self.sell_histogram = np.zeros(size, dtype=np.int64)
+        
         self.total_volume = 0
         self.lock = threading.Lock()
         
         # Cache for expensive calculation
         self.cached_levels = (0, 0, 0) # POC, VAH, VAL
     
-    def update(self, price, volume):
+    def update(self, price, volume, tick_type=0):
         """
         Thread-safe update.
         Price should be standard integer price (e.g. 23500).
+        tick_type: 1=Buy (Ask), 2=Sell (Bid), 0=Unknown
         """
         p_int = int(price)
         with self.lock:
             _update_histogram(self.histogram, p_int, volume)
+            
+            if tick_type == 1:
+                _update_histogram(self.buy_histogram, p_int, volume)
+            elif tick_type == 2:
+                _update_histogram(self.sell_histogram, p_int, volume)
+            
             self.total_volume += volume
             
     def calculate(self):
@@ -107,16 +117,21 @@ class VolumeProfileEngine:
         
         Args:
             bin_size (int): Aggregate prices into bins of this size.
+            
+        Returns:
+            (prices, total_vols, buy_vols, sell_vols)
         """
         with self.lock:
             # Return sparse representation: (Prices, Volumes)
             # Filter out zeros to save bandwidth
             non_zeros = np.nonzero(self.histogram)[0]
             if len(non_zeros) == 0:
-                return np.array([]), np.array([])
+                return np.array([]), np.array([]), np.array([]), np.array([])
             
             prices = non_zeros
             volumes = self.histogram[non_zeros]
+            buy_vols = self.buy_histogram[non_zeros]
+            sell_vols = self.sell_histogram[non_zeros]
             
             # --- Binning Logic ---
             if bin_size > 1:
@@ -126,12 +141,17 @@ class VolumeProfileEngine:
                 # 2. Re-aggregate (Sum volumes by bin)
                 # Using np.unique is efficient for sparse data
                 unique_bins, inverse_indices = np.unique(binned_prices, return_inverse=True)
+                
                 binned_volumes = np.zeros_like(unique_bins, dtype=np.int64)
+                binned_buy = np.zeros_like(unique_bins, dtype=np.int64)
+                binned_sell = np.zeros_like(unique_bins, dtype=np.int64)
                 
                 # Calculate sum for each bin
                 np.add.at(binned_volumes, inverse_indices, volumes)
+                np.add.at(binned_buy, inverse_indices, buy_vols)
+                np.add.at(binned_sell, inverse_indices, sell_vols)
                 
-                return unique_bins.copy(), binned_volumes.copy()
+                return unique_bins.copy(), binned_volumes.copy(), binned_buy.copy(), binned_sell.copy()
             
             # Return COPIES
-            return prices.copy(), volumes.copy()
+            return prices.copy(), volumes.copy(), buy_vols.copy(), sell_vols.copy()

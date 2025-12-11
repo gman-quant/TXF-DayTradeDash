@@ -129,7 +129,7 @@ def build_combined_figure(data):
         
         # --- 2. 交互行為 (Interaction) ---
         uirevision='constant',  # 鎖定狀態：防止數據更新時重置縮放
-        hovermode='x',          # 懸停模式
+        hovermode='x',    # Time-aligned
         
         # --- 3. 圖例設定 (Legend) ---
         legend=dict(
@@ -137,10 +137,6 @@ def build_combined_figure(data):
             yanchor="bottom", y=1.02, 
             xanchor="center", x=0.5
         ),
-
-        # --- 4. 條狀圖設定 (Bar Mode) ---
-        barmode='overlay',      # 關鍵：允許不同 Bar 重疊而非並排擠壓
-        bargap=0,               # [Fix] Remove gap between bars
 
         # --- 5. Y 軸配置 (Y-Axes Configuration) ---
         # [Axis 1] 主圖價格 (右軸)

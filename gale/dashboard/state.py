@@ -122,7 +122,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         default_range = None
         
     # 8. Extract Volume Profile Data (with Binning)
-    vp_prices, vp_volumes = indicator_manager.vp_engine.get_distribution(bin_size=VP_BIN_SIZE)
+    vp_prices, vp_volumes, vp_buy, vp_sell = indicator_manager.vp_engine.get_distribution(bin_size=VP_BIN_SIZE)
     poc, vah, val = indicator_manager.vp_engine.calculate()
 
     return {
@@ -138,6 +138,8 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'vp_data': {
             'prices': vp_prices,
             'volumes': vp_volumes,
+            'buy_volumes': vp_buy,
+            'sell_volumes': vp_sell,
             'poc': poc,
             'vah': vah,
             'val': val

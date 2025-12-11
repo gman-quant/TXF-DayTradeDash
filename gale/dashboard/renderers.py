@@ -31,7 +31,15 @@ def add_main_price_chart(fig, data, row=1, col=1):
             low=data['candles']['low'], close=data['candles']['close'],
             name=f'{current_tf} Candle',
             increasing_line_color=UI_COLOR['UP'], decreasing_line_color=UI_COLOR['DOWN'],
-            increasing_fillcolor=UI_COLOR['UP'], decreasing_fillcolor=UI_COLOR['DOWN']
+            increasing_fillcolor=UI_COLOR['UP'], decreasing_fillcolor=UI_COLOR['DOWN'],
+            
+            hovertemplate=(
+                '<b>%{x|%H:%M:%S}</b><br>' +
+                'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
+                'V: %{text}' +
+                '<extra></extra>' 
+            ),
+            text=[f'{v:,}' for v in data['candles']['volume']] # Simple volume text
         ), row=row, col=col)
 
 def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
@@ -92,22 +100,72 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
     prices = vp_data['prices']
     volumes = vp_data['volumes']
     
-    # 2. Bar Chart
-    fig.add_trace(go.Bar(
-        y=prices, 
-        x=volumes,
-        orientation='h',
-        xaxis='x3', 
-        yaxis='y', 
-        name='Volume Profile',
-        width=bin_size * 0.95,
-        marker_color='rgba(100, 100, 100, 0.7)',
-        marker_line_width=0,
-        hoverinfo='y+x',
-        opacity=0.4,
-        legendgroup=legend_group,
-        showlegend=True
-    ))
+    # Check if Delta Profile data is available
+    has_delta = 'buy_volumes' in vp_data and len(vp_data['buy_volumes']) > 0
+    
+    if has_delta:
+        buy_vols = vp_data['buy_volumes']
+        sell_vols = vp_data['sell_volumes']
+        
+        buy_vols = vp_data['buy_volumes']
+        sell_vols = vp_data['sell_volumes']
+        total_vols = vp_data['volumes'] # Need Total for the trick
+        
+        # Strategy: Simulate Stacking in Overlay Mode
+        # Layer 1 (Bottom): Draw TOTAL Volume -> Color it GREEN (Buy)
+        # Layer 2 (Top):    Draw SELL Volume  -> Color it RED (Sell)
+        # Visual Result:    [ Red (covers bottom) ] [ Green (remainder) ]
+        
+        # 2a. Layer 1: Total (Green)
+        # User sees this as "Buy Vol" (the green part sticking out)
+        fig.add_trace(go.Bar(
+            y=prices,
+            x=total_vols,
+            customdata=buy_vols, # Pass real Buy Vol for tooltip
+            orientation='h',
+            xaxis='x3',
+            yaxis='y',
+            name='Buy Vol',
+            width=bin_size * 0.95,
+            marker_color='rgba(0, 230, 118, 0.1)', # Green
+            marker_line_width=0,
+            hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
+            legendgroup=legend_group,
+            showlegend=True
+        ))
+        
+        # 2b. Layer 2: Sell (Red)
+        fig.add_trace(go.Bar(
+            y=prices,
+            x=sell_vols,
+            orientation='h',
+            xaxis='x3',
+            yaxis='y',
+            name='Sell Vol',
+            width=bin_size * 0.95,
+            marker_color='rgba(255, 82, 82, 0.25)', # Red opacity increased to 0.25
+            marker_line_width=0,
+            hovertemplate='<b>Sell Vol</b>: %{x:,}<br>Price: %{y}<extra></extra>',
+            legendgroup=legend_group,
+            showlegend=True
+        ))
+        
+    else:
+        # 2. Bar Chart (Total only fallback)
+        fig.add_trace(go.Bar(
+            y=prices, 
+            x=volumes,
+            orientation='h',
+            xaxis='x3', 
+            yaxis='y', 
+            name='Volume Profile',
+            width=bin_size * 0.95,
+            marker_color='rgba(100, 100, 100, 0.4)',
+            marker_line_width=0,
+            hoverinfo='y+x',
+            legendgroup=legend_group,
+            showlegend=True
+        ))
 
 class OscillatorRenderers:
     """Namespace for Oscillator visualization logic."""
