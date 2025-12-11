@@ -64,7 +64,7 @@ def create_main_layout():
         children=[
         
             # 1. 標題區 (Header)
-            html.H2("🚀 TXF Gale Quant Engine", style={'textAlign': 'center', 'marginBottom': '5px'}),
+            html.H2("🇹🇼 TXF Gale Quant Engine", style={'textAlign': 'center', 'marginBottom': '5px'}),
             
             # 2. 戰情面板 (Live Scoreboard)
             # 內容由 Callback 動態注入

@@ -156,13 +156,15 @@ INDICATORS_SETUP = [
     
     # 1. 🟢 螞蟻搬象 (Retail Flow)
     # 監控 1~4 口的散戶動向。
-    # 這是市場的「背景噪音」或「反向指標」。
+    # [Upgraded] 改用 effective_volume (重組後量)，避免被拆單詐騙。
+    # 原理：若外資用 20 筆 5 口單進攻，effective_volume 會將後 19 筆設為 0，第 1 筆設為 100。
+    # 結果：Retail Flow 看到的是 [100, 0, 0...]，完全大於 5 口門檻 -> 自動過濾雜訊。
     {
         'id': 'Retail_Flow',
         'func': 'calc_small_lot_net',
         'type': TYPE_OSCILLATOR,
         'color': '#00FF00',  # 綠色
-        'inputs': ['volume', 'type'], 
+        'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # 統計 < 5 的單
         'yaxis': 'y',
         'style': 'bar'
@@ -170,29 +172,27 @@ INDICATORS_SETUP = [
 
     # 2. 🟡 主力部隊 (Smart Money)
     # 監控 >= 5 口的單。
-    # 日盤：這是中實戶與程式單。
-    # 夜盤：這就是主力了！
+    # [Upgraded] 同樣使用 effective_volume。
+    # 結果：上述的 100 口大單會正確被 Smart Money 捕捉到，還原主力真實意圖。
     {
-        'id': 'Smart_Money', # 改個名字，這是一般大戶
+        'id': 'Smart_Money', 
         'func': 'calc_large_lot_net',
         'type': TYPE_OSCILLATOR,
         'color': '#FFFF00',  # 黃色
-        'inputs': ['volume', 'type'], 
+        'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # 統計 >= 5 的單
         'yaxis': 'y',
         'style': 'bar'
     },
 
-    # 3. 🔴 巨鱷核彈 (Whale Nuke) - 專門抓那筆 299 口的
+    # 3. 🔴 巨鱷核彈 (Whale Nuke)
     # 監控 >= 15 口的超大單。
-    # 這種單出現時，通常是日盤的「趨勢發動點」或「停損引爆」。
-    # 夜盤可能幾天都看不到一根，但一出來就是送分題。
     {
         'id': 'Whale_Nuke',
         'func': 'calc_large_lot_net',
         'type': TYPE_OSCILLATOR,
         'color': '#FF0000',  # 紅色 (極度顯眼)
-        'inputs': ['volume', 'type'], 
+        'inputs': ['effective_volume', 'type'], 
         'args': [250, 15],   # 門檻拉高到 20
         'yaxis': 'y',
         'style': 'bar'

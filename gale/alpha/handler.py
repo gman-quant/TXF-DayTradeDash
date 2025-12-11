@@ -56,6 +56,21 @@ class IndicatorManager:
         # 新增微結構指標容器
         self.history['velocity'] = np.zeros(buffer_capacity, dtype=np.float64)
         self.history['imbalance'] = np.zeros(buffer_capacity, dtype=np.float64)
+        
+        # 🆕 有效量 (Effective Volume)
+        # 用於存儲「重組後」的成交量。
+        # 拆單 (Split Orders) 會被合併到第一筆，其餘設為 0。
+        # 🆕 有效量 (Effective Volume) - [Core Feature: Volume Conservation]
+        # 用於存儲「重組後」的成交量。這是本系統最核心的邏輯之一。
+        # 原理：當偵測到微秒級拆單 (Split Orders) 時，系統會將量「歸戶」到第一筆，
+        # 並將後續的量設為 0，確保總量守恆 (Conservation of Volume) 且不重複計算。
+        # 這樣 Retail Flow 就不會被騙，Whale Nuke 也能精準抓到。
+        self.history['effective_volume'] = np.zeros(buffer_capacity, dtype=np.int64) 
+
+        # 重組狀態變數
+        self.rec_last_time = 0
+        self.rec_last_side = 0
+        self.rec_last_idx = 0 # 紀錄當前事件最開始的那個 Index
 
         # ==========================================
         # 3. ⚡️ 預先綁定 (Pre-binding) 邏輯
@@ -100,6 +115,9 @@ class IndicatorManager:
                 # --- 籌碼數據 (Order Flow Data) ---
                 elif input_name == 'cum_buy_vol':  input_indices.append(11)
                 elif input_name == 'cum_sell_vol': input_indices.append(12)
+                
+                # 🆕 Local History Mapping
+                elif input_name == 'effective_volume': input_indices.append(-1) # Special Flag
             
             # C. 預先準備固定參數 (e.g. window size)
             # Tuple 結構比較快，這一步將靜態參數打包
@@ -248,11 +266,50 @@ class IndicatorManager:
         self.history["volume"][curr_idx]    = vol_val
         
         # ==========================================
+        # 5. 大單重組 (Whale Reconstruction) - Effective Volume Logic
+        # [核心演算法：微秒級拆單還原]
+        # ==========================================
+        # 預設先填入當前量 (Assume authentic trade)
+        self.history['effective_volume'][curr_idx] = vol_val
+        
+        # [Step 1] 檢查是否為「同一事件延續」 (同時間 ms + 同方向)
+        # 注意：排除 type=0 (Unknown)
+        is_same_event = (time_val == self.rec_last_time) and (type_val == self.rec_last_side) and (type_val != 0)
+        
+        if is_same_event:
+            # [Case A: 偵測到拆單 (Split Order)]
+            # 這是同一波攻擊的後續部隊。
+            
+            # 1. 搬運法 (Volume Transfer)：把當前這筆量，加回「事件起始點 (Leader)」
+            # 這樣 Leader (即 rec_last_idx) 的量會越來越大，還原出真正的大單規模。
+            self.history['effective_volume'][self.rec_last_idx] += vol_val
+            
+            # 2. 歸零法 (Zeroing)：把當前這筆設為 0 (Follower 消失)
+            # 這是為了「總量守恆」。因為量已經搬給 Leader 了，這裡必須消失，
+            # 否則 K 線圖的成交量會變成兩倍 (Double Counting)。
+            # 副作用：依賴 effective_volume 的指標 (如 Retail Flow) 會看到 0，自動忽略此雜訊。
+            self.history['effective_volume'][curr_idx] = 0
+            
+        else:
+            # [Case B: 新事件 (New Event)]
+            # 時間不同 或 方向不同 -> 視為獨立的新單。
+            self.rec_last_time = time_val
+            self.rec_last_side = type_val
+            self.rec_last_idx = curr_idx
+            # effective_volume 已經在上面預設為 vol_val 了，不用動
+
+        # ==========================================
         # 2. 執行 Numba 技術指標計算
         # ==========================================
         for ind_id, calc_func, input_indices, fixed_args in self.executors:
-            # A. 動態組裝參數 (從 snapshot tuple 中取出對應的 NumPy Array Reference)
-            dynamic_args = [snapshot_tuple[i] for i in input_indices]
+            # A. 動態組裝參數
+            # [Fix] Support Local Arrays via Special Index (-1)
+            dynamic_args = []
+            for i in input_indices:
+                if i == -1:
+                    dynamic_args.append(self.history['effective_volume'])
+                else:
+                    dynamic_args.append(snapshot_tuple[i]) 
             
             # B. 呼叫 JIT 編譯函數 (極速運算)
             # 注意：這裡只計算當前這一個點 (Incremental Calculation)
@@ -280,5 +337,9 @@ class IndicatorManager:
         vel, imb = self.micro_engine.get_metrics()
         self.history['velocity'][curr_idx] = vel
         self.history['imbalance'][curr_idx] = imb
+        
+        # ==========================================
+        # 5. [已移動] 大單重組邏輯已移至上方 (Step 2 之前)
+        # ==========================================
         
         

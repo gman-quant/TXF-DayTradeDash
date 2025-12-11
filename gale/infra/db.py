@@ -107,7 +107,7 @@ def load_prev_close(target_date_str, op='<'):
                     if result:
                         prev_close = float(result[0])
                         ref_date = result[1]
-                        logger.info(f"✅ Found Prev Close: {prev_close} (Date: {ref_date}) using op='{op}'")
+                        logger.info(f"✅ Found Prev Close: {prev_close} (Date: {ref_date})")
                         return prev_close
                 finally:
                     con.close()

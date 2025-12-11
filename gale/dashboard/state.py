@@ -100,13 +100,16 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
 
     # K 線 X 軸計算 (平移至 K 線結束時間，符合視覺習慣)
     raw_candle_time = np.array(plot_candles['time'], dtype=np.int64)
+
     candle_x = (raw_candle_time + period_ms).astype('datetime64[ms]') + np.timedelta64(8, 'h')
 
     # 6. 技術指標數據解環
     view_history = {}
     for key in indicator_manager.history:
         # 同步取得對應的指標數據切片
-        view_history[key] = indicator_manager.get_linear_snapshot(key)
+        # Ensure we don't overwrite whale_nuke if it was already processed
+        if key not in view_history:
+            view_history[key] = indicator_manager.get_linear_snapshot(key)
 
     # [NEW] VWAP Bands Calculation (On-the-fly)
     if 'close' in view_history and 'volume' in view_history:

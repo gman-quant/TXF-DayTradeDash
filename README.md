@@ -1,4 +1,4 @@
-# 🚀 TXF Gale Quant Engine (v1.0)
+# 🇹🇼 TXF Gale Quant Engine (v1.0)
 
 **TXF Gale Quant Engine** 是一個專為台灣指數期貨 (TXF) 設計的超低延遲量化數據管線與實時監控系統。
 
