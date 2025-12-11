@@ -195,8 +195,8 @@ class OscillatorRenderers:
         fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
 
     @staticmethod
-    def render_retail_flow(fig, x_data, y_data, config, row, col):
-        """繪製散戶單 (<5口) 柱狀圖"""
+    def render_small_lot(fig, x_data, y_data, config, row, col):
+        """繪製小單淨量 (Small Lot <5口) 柱狀圖"""
         bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (< 5)",
@@ -204,8 +204,8 @@ class OscillatorRenderers:
         ), row=row, col=col, secondary_y=False) # 使用左軸
 
     @staticmethod
-    def render_smart_money(fig, x_data, y_data, config, row, col):
-        """繪製大戶單 (>=5口) 柱狀圖"""
+    def render_medium_lot(fig, x_data, y_data, config, row, col):
+        """繪製中單淨量 (Medium Lot >=5口) 柱狀圖"""
         # 使用特殊配色區分大戶
         cols = np.where(y_data >= 0, "#8C5B00", "#006D91")
         fig.add_hline(y=0, line_width=1, line_color="#555", row=row, col=col)
@@ -215,8 +215,8 @@ class OscillatorRenderers:
         ), row=row, col=col, secondary_y=False)
 
     @staticmethod
-    def render_whale_nuke(fig, x_data, y_data, config, row, col):
-        """繪製特大單 (>=15口) 柱狀圖"""
+    def render_large_lot(fig, x_data, y_data, config, row, col):
+        """繪製大單淨量 (Large Lot >=15口) 柱狀圖"""
         # 使用高亮色 (Neon)
         cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF")
         fig.add_trace(go.Bar(

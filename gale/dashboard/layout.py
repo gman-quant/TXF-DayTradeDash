@@ -93,8 +93,8 @@ def create_main_layout():
                         html.Label("📊 Lookback Window", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Slider(
                             id='lookback-slider',
-                            min=500, max=50000, step=500, value=50000,
-                            marks={500: '500', 2000: '2K', 5000: '5K', 10000: '10K', 25000: '25K', 50000: '50K'},
+                            min=2000, max=50000, step=500, value=50000,
+                            marks={2000: '2K', 5000: '5K', 10000: '10K', 25000: '25K', 50000: '50K'},
                             tooltip={"placement": "bottom", "always_visible": True}
                         )
                     ]),
