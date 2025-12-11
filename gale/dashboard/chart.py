@@ -34,19 +34,30 @@ def create_blank_figure() -> go.Figure:
 
 def build_combined_figure(data):
     """
-    繪製主副圖合併的 Subplot。
-    Row 1: 價格 (Price) + Overlays
-    Row 2: 動能 (Momentum) + Oscillators
+    [核心繪圖入口] 建構完整的主副圖 Subplot
+    
+    Layout Structure:
+    -------------------------------------------------
+    | Row 1: 主圖 (Price Chart)                      |
+    |        - Candlestick (K 線)                    |
+    |        - Overlays (SMA, VWAP, Bands...)        |
+    |        - Volume Profile (Right Side Overlay)   |
+    -------------------------------------------------
+    | Row 2: 副圖 (Sub Chart)                        |
+    |        - Volume / Oscillator (RSI, MACD...)    |
+    |        - CVD (Order Flow)                      |
+    -------------------------------------------------
     """
     if data is None:
         return create_blank_figure()
         
-    # 1. 建立子圖框架
+    # 1. 建立子圖框架 (2 Rows)
+    # shared_xaxes=True: 上下圖共用 X 軸縮放
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
         vertical_spacing=0.05,
-        row_heights=[0.7, 0.3], 
+        row_heights=[0.7, 0.3],     # 高度比例 7:3
         specs=[[{"secondary_y": False}], [{"secondary_y": True}]] 
     )
 
@@ -54,14 +65,14 @@ def build_combined_figure(data):
     # Row 1: 主圖 (Price)
     # ---------------------------------------------------------
     
-    # 1. Main Chart (Row 1)
+    # 1. Main Chart (K 線圖)
     renderers.add_main_price_chart(fig, data, row=1, col=1)
 
-    # 2. Overlays (Row 1)
-    # Default OFF (Legend Only)
+    # 2. Overlays (主圖指標)
+    # 預設隱藏 (Legend Only) 的指標列表
     DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60', 'Max_250', 'Min_250']
     
-    # [NEW] VWAP Bands Rendering
+    # [特殊處理] VWAP Bands (通道)
     if 'VWAP_Upper' in data['history']:
         # Upper Band
         renderers.add_overlay_indicator(fig, data, {
@@ -74,40 +85,53 @@ def build_combined_figure(data):
             'legendgroup': 'VWAP_Group'
         }, row=1, col=1)
 
+    # 動態渲染 Config 中的所有 Overlay 指標
     for ind in INDICATORS_SETUP:
         if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
-            # Start count
+            # 記錄當前 Trace 數量，以便判斷是否成功新增
             n_traces_before = len(fig.data)
             renderers.add_overlay_indicator(fig, data, ind, row=1, col=1)
-            # The new trace is at -1
+            
+            # 若成功新增，設定可見性
             if len(fig.data) > n_traces_before:
                 if ind['id'] in DEFAULT_OFF_LEGENDS:
                     fig.data[-1].visible = 'legendonly'
                 else:
                     fig.data[-1].visible = True
 
-    # 3. Oscillators (Row 2)
+    # 3. Oscillators (副圖指標 - Row 2)
     valid_indicators = [ind for ind in INDICATORS_SETUP if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']]
     
     for ind in valid_indicators:
         ind_id = ind['id']
+        # 降頻取樣 (與 State.py 的 step 一致)
         y_data = data['history'][ind_id][data['start_idx']::data['step']]
         x_data = data['tick_x']
         
-        # Dynamic Dispatch logic
+        # 動態分派 Renderer (Dynamic Dispatch)
+        # 尋找 renderers.py 中對應的 render_xxx 方法
         method_name = f"render_{ind_id.lower()}"
         renderer = getattr(renderers.OscillatorRenderers, method_name, None)
         
         if renderer:
+            # 判斷是否預設隱藏
+            rank = getattr(renderer, 'rank', 99) # Handle ranking if needed
+            
+            # 呼叫 renderer
             renderer(fig, x_data, y_data, ind, row=2, col=1)
+            
+            # Post-processing visibility
+            if ind['id'] in DEFAULT_OFF_LEGENDS:
+                fig.data[-1].visible = 'legendonly'
         else:
-            # Fallback (Simple Line) if no specific renderer found
+            # Fallback (Simple Line)
             pass
 
     # 4. Volume Profile (Overlay on Row 1)
+    # 這是一個特殊的 Trace，疊加在主圖右側
     vp = data.get('vp_data')
     if vp:
-        # Prepare X range for lines
+        # 計算 X 軸範圍供參考線繪製
         x_range = None
         if len(data['tick_x']) > 0:
             x_range = (data['tick_x'][0], data['tick_x'][-1])
@@ -127,14 +151,17 @@ def build_combined_figure(data):
         paper_bgcolor=UI_COLOR['BG_MAIN'],
         plot_bgcolor=UI_COLOR['BG_MAIN'],
         
+        # 重要：Volume Profile 使用了 Stacking Trick (Green + Red Overlay)，需設定為 overlay 模式
+        barmode='overlay',
+        
         # --- 2. 交互行為 (Interaction) ---
         uirevision='constant',  # 鎖定狀態：防止數據更新時重置縮放
-        hovermode='x',    # Time-aligned
+        hovermode='x',    # 懸停模式：X (Time-aligned) - 鎖定時間軸顯示所有數據
         
         # --- 3. 圖例設定 (Legend) ---
         legend=dict(
-            orientation="h", 
-            yanchor="bottom", y=1.02, 
+            orientation="h",       # 水平排列
+            yanchor="bottom", y=1.02, # 位於圖表上方
             xanchor="center", x=0.5
         ),
 
@@ -162,7 +189,7 @@ def build_combined_figure(data):
             zeroline=True, 
             zerolinewidth=1, 
             zerolinecolor='rgba(255,255,255,0.3)',
-            overlaying='y2'     # 關鍵：共享副圖空間
+            overlaying='y2'     # 關鍵：共享副圖空間 (Dual Axis)
         ),
         
         # --- 6. X 軸配置 (X-Axis Base) ---
@@ -173,12 +200,13 @@ def build_combined_figure(data):
         ),
         
         # [Axis 4] Volume Profile X-Axis (Overlay Top)
+        # 用於繪製 Volume Profile 的橫向 Bar
         xaxis3=dict(
-            overlaying='x', # Overlay on main X axis
-            side='top',     # Put labels on top (or hidden)
+            overlaying='x', # 疊加在主 X 軸上
+            side='top',     # 座標軸顯示在上方 (或隱藏)
             showgrid=False,
-            visible=False,  # Hide axis to reduce clutter
-            matches=None    # Crucial: Do not sync with time axis
+            visible=False,  # 隱藏軸線以免干擾視覺
+            matches=None    # 關鍵：不可以跟時間軸同步縮放 (因為它是成交量刻度)
         ),
     )
     
@@ -193,6 +221,7 @@ def build_combined_figure(data):
         matches='x',          # 確保上下圖縮放同步
     
         # 2. 十字準星 (Spikes)
+        # 這裡設定的是基礎十字線行為，是否顯示取決於 hovermode
         showspikes=True,
         spikemode='across',       # 橫跨模式：貫穿整個繪圖區
         spikethickness=0.5,       # 線條粗細
@@ -201,8 +230,8 @@ def build_combined_figure(data):
     )
     
     # [CRITICAL FIX]
-    # update_xaxes(matches='x') is aggressive and overwrites xaxis3.matches.
-    # We must explicitly reset typical overlay axes to None AFTER the global call.
+    # update_xaxes(matches='x') 會遞歸套用到所有 x 軸，包括 xaxis3 (VP 軸)。
+    # 但 VP 軸不能跟時間軸同步，所以必須在最後再次強制解除 matches。
     fig.update_layout(xaxis3=dict(matches=None))
     
     return fig

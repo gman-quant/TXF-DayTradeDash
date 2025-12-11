@@ -78,7 +78,7 @@ def create_main_layout():
                 
                     # [左側] 週期選擇 (Dropdown)
                     html.Div(style={'width': '150px', 'marginRight': '20px'}, children=[
-                        html.Label("⏱️ K線週期", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                        html.Label("⏱️ Timeframe", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Dropdown(
                             id='timeframe-dropdown',
                             options=tf_options,
@@ -90,13 +90,27 @@ def create_main_layout():
 
                     # [右側] 顯示筆數 (Slider)
                     html.Div(style={'flex': '1'}, children=[
-                        html.Label("📊 顯示筆數 (Lookback Window)", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                        html.Label("📊 Lookback Window", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Slider(
                             id='lookback-slider',
                             min=500, max=50000, step=500, value=50000,
                             marks={500: '500', 2000: '2K', 5000: '5K', 10000: '10K', 25000: '25K', 50000: '50K'},
                             tooltip={"placement": "bottom", "always_visible": True}
                         )
+                    ]),
+                    
+                    # [最右側] 截圖按鈕 (Snapshot)
+                    html.Div(style={'marginLeft': '20px'}, children=[
+                        html.Button("📸 Save HTML", id='btn-snapshot', n_clicks=0, style={
+                            'backgroundColor': '#666666', # [User Request] Gray Button
+                            'color': '#FFF',              # White Text
+                            'border': 'none',
+                            'padding': '8px 15px',
+                            'borderRadius': '5px',
+                            'fontWeight': 'bold',
+                            'cursor': 'pointer'
+                        }),
+                        dcc.Download(id="download-snapshot")
                     ])
                 ]
             ),
@@ -106,7 +120,7 @@ def create_main_layout():
             dcc.Graph(
                 id='main-chart', 
                 figure=initial_figure, 
-                style={'height': '80vh'}, # 佔據剩餘高度
+                style={'height': '85vh'}, # 佔據剩餘高度
                 config={'scrollZoom': True, 'displayModeBar': False} 
             ),
 
@@ -118,6 +132,9 @@ def create_main_layout():
             
             # 紀錄使用者的縮放狀態 (用於保持 Zoom Level)
             dcc.Store(id='chart-zoom-state', data=None), 
+
+            # [Fix] Missing Store caused callback to fail
+            dcc.Store(id='scoreboard-state', data={}),
         ]
     )
 

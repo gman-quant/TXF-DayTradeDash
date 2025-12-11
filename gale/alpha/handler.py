@@ -9,24 +9,26 @@ from gale.alpha.microstructure import MicrostructureEngine
 
 class IndicatorManager:
     """
-    指標管理器 (全 NumPy RingBuffer 版)。
+    指標管理器 (全 NumPy RingBuffer 版)
     
     核心職責：
-    1. 讀取 Config，動態決定要計算哪些指標。
-    2. 接收 RingBuffer 快照，進行指標計算 (使用 Numba)。
-    3. 進行 K 線 (Candle) 的實時聚合。
-    4. 提供 O(1) 的狀態查詢 (count, latest_timestamp) 給 Dashboard Server。
+    1. 動態配置 (Config Driven): 讀取 `INDICATORS_SETUP`，決定要計算哪些指標。
+    2. 高效計算 (Numba Integration): 接收 RingBuffer 快照，呼叫編譯過的 Numba 函數進行計算。
+    3. 即時聚合 (Real-time Aggregation): 維護各週期 (1K, 5K...) 的 OHLC K 線狀態。
+    4. 狀態查詢 (O(1) Access): 提供 Dashboard Server 快速查詢 Count、Latest Timestamp 與快照。
     """
     
     def __init__(self, buffer_capacity):
         self.capacity = buffer_capacity
 
         # 紀錄當前的 head 位置 (CoreProcessor 傳過來的寫入游標)
+        # 用於追踪 RingBuffer 的寫入進度
         self.current_head = 0
         
         # ==========================================
-        # 1. 基礎歷史數據容器 (固定長度 Array)
+        # 1. 基礎歷史數據容器 (固定長度 NumPy Array)
         # ==========================================
+        # 這些 Array 與 SharedMemory 是分離的，用於存儲指標計算結果與本地快照
         self.history = {
             "timestamp": np.zeros(buffer_capacity, dtype=np.int64),
             "close": np.zeros(buffer_capacity, dtype=np.int64),
@@ -34,33 +36,36 @@ class IndicatorManager:
         }
         
         # 2. 🆕 多週期 K 線容器
-        # 結構變更： self.candles['1m']['open'] ...
+        # 用於即時繪製 K 線圖，無需每次重算
         self.candles = {}
-        self.current_candles = {} # 暫存各週期的當前 K 線
+        self.current_candles = {} # 暫存各週期的當前 K 線 (尚未收盤的 Bar)
         
-        # 初始化所有週期
+        # 初始化所有週期 (依據 settings.TIMEFRAMES)
         for tf_name in TIMEFRAMES:
             self.candles[tf_name] = {
                 'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': []
             }
             self.current_candles[tf_name] = {}
 
-        # 2.5 Initialize Volume Profile & Microstructure Engines
+        # 2.5 初始化引擎 (Alpha Engines)
+        # Volume Profile: 負責價格分佈計算 (POC/VA)
         self.vp_engine = VolumeProfileEngine()
-        self.micro_engine = MicrostructureEngine(window_seconds=3) # 3-second window
+        # Microstructure: 負責高頻微結構計算 (Velocity, Imbalance)
+        self.micro_engine = MicrostructureEngine(window_seconds=3) 
         
-        # Add new metrics to history
+        # 新增微結構指標容器
         self.history['velocity'] = np.zeros(buffer_capacity, dtype=np.float64)
         self.history['imbalance'] = np.zeros(buffer_capacity, dtype=np.float64)
 
         # ==========================================
         # 3. ⚡️ 預先綁定 (Pre-binding) 邏輯
-        # 目的：在 __init__ 階段解析所有函數與參數
+        # 目的：在 __init__ 階段解析所有函數與參數，避免在 on_tick 迴圈中重複查找
         # ==========================================
         self.executors = []
         
         for ind in INDICATORS_SETUP:
             ind_id = ind['id']
+            # 為每個指標分配存儲空間
             self.history[ind_id] = np.zeros(buffer_capacity, dtype=np.float64)
             
             # A. 預先抓取 Numba 函數
@@ -72,33 +77,35 @@ class IndicatorManager:
                 continue
             
             # B. 預先解析輸入參數映射 (Input Mapping)
+            # 將 Config 中的字串名稱 (e.g. 'close') 映射到 snapshot_tuple 的 index
             input_indices = []
             for input_name in ind['inputs']:
-                # --- 基礎數據 ---
+                # --- 基礎數據 (Snapshot Data) ---
                 if input_name == 'close':        input_indices.append(0)
                 elif input_name == 'volume':     input_indices.append(1)
                 elif input_name == 'type':       input_indices.append(2)
                 elif input_name == 'timestamp':  input_indices.append(3)
                 elif input_name == 'underlying_price': input_indices.append(4)
                 
-                # --- 累積數據 (O(1) 計算用) ---
+                # --- 累積數據 (Cumulative Data for O(1) calc) ---
                 elif input_name == 'cum_volume': input_indices.append(5)
                 elif input_name == 'cum_pv':     input_indices.append(6)
                 elif input_name == 'cum_close':  input_indices.append(7)
                 
-                # --- 狀態數據 (Stateful) ---
+                # --- 狀態數據 (Stateful Data) ---
                 elif input_name == 'session_high': input_indices.append(8)
                 elif input_name == 'session_low':  input_indices.append(9)
                 elif input_name == 'total_volume': input_indices.append(10)
                 
-                # --- 籌碼數據 (CVD/Delta) ---
+                # --- 籌碼數據 (Order Flow Data) ---
                 elif input_name == 'cum_buy_vol':  input_indices.append(11)
                 elif input_name == 'cum_sell_vol': input_indices.append(12)
             
-            # C. 預先準備固定參數
+            # C. 預先準備固定參數 (e.g. window size)
+            # Tuple 結構比較快，這一步將靜態參數打包
             fixed_args = tuple(ind['args'] + [self.capacity])
             
-            # 將執行所需資訊打包
+            # 將執行所需資訊打包存入 executors 列表
             self.executors.append((ind_id, calc_func, input_indices, fixed_args))
 
     # ==========================================
@@ -154,22 +161,30 @@ class IndicatorManager:
 
     def _update_candles(self, tick_time_ms, price, volume):
         """
-        🆕 同時更新所有週期的 K 線
+        [內部方法] 更新所有時間週期的 K 線狀態
+        
+        邏輯：
+        1. 根據時間戳將 Tick 歸類到對應的 Bucket (e.g. 10:00:05 -> 10:00:00 Bucket)
+        2. 檢查是否需要換 K 線 (bucket_time != current_metric.time)
+        3. 聚合 OHLCV 數據
         """
         for tf_name, period_ms in TIMEFRAMES.items():
-            # 計算該週期的 Bucket Time
+            # 計算該週期的 Bucket Time (向下取整)
             bucket_time_ms = (tick_time_ms // period_ms) * period_ms
             
             curr = self.current_candles[tf_name]
             storage = self.candles[tf_name]
             
             if not curr or curr['time'] != bucket_time_ms:
-                # 1. 關閉舊 K 線
+                # [狀態切換] 新的 K 線週期開始
+                
+                # 1. 結算上一根 K 線 (如果存在)
                 if curr:
                     for k, v in curr.items():
+                        # 'new_tick' 只是標記，不存入歷史陣列
                         if k != 'new_tick': storage[k].append(v)
                 
-                # 2. 開新 K 線
+                # 2. 初始化新 K 線
                 self.current_candles[tf_name] = {
                     'time': bucket_time_ms,
                     'open': price,
@@ -180,7 +195,7 @@ class IndicatorManager:
                     'new_tick': True 
                 }
             else:
-                # 3. 更新當前 K 線
+                # [狀態更新] 更新當前 K 線
                 curr['high'] = max(curr['high'], price)
                 curr['low'] = min(curr['low'], price)
                 curr['close'] = price
@@ -190,83 +205,79 @@ class IndicatorManager:
 
     def on_tick(self, snapshot_tuple):
         """
-        當 CoreProcessor 收到新 Tick 時呼叫此函數。
+        核心事件處理：當收到新 Tick 時被觸發
         
-        def get_snapshot(self):
-            return (
-                self.close,             # 0
-                self.volume,            # 1
-                self.tick_type,         # 2
-                self.timestamp,         # 3
-                self.underlying_price,  # 4
-                self.cum_volume,        # 5
-                self.cum_pv,            # 6
-                self.cum_close,         # 7
-                self.session_high,      # 8
-                self.session_low,       # 9
-                self.total_volume,      # 10
-                self.cum_buy_vol,       # 11
-                self.cum_sell_vol,      # 12
-                self.head               # 13
-            )
+        Args:
+            snapshot_tuple (tuple): 從 SharedMemory 讀取的快照，包含所有指針與累積變數。
+                                    這是為了避免 GIL 鎖競爭，一次性傳入所有數據。
+        
+        Process Flow:
+            1. Unpack Snapshot -> 取得當前指針 (Head) 與基礎數據 (Close, Vol, Time)
+            2. Update History -> 寫入本地 RingBuffer
+            3. Run Numba Indicators -> 執行所有預編譯的技術指標計算
+            4. Aggregate Candles -> 更新 OHLC
+            5. Update Engines -> 觸發 Volume Profile 與 Microstructure 計算
         """
-        # snapshot_tuple 的最後一個是 head
+        # snapshot_tuple 的最後一個是 head 指針
         head = snapshot_tuple[-1]
         
-        # 更新內部的 head 紀錄，供 get_linear_snapshot 使用
+        # 更新內部的 head 紀錄，供 get_linear_snapshot (Dashboard View) 使用
+        # 這樣前端在切片時才知道哪裡是終點
         self.current_head = head
         
-        # 計算寫入位置 (snapshot 裡的 head 是"下一個空位"，所以當前數據在 head-1)
+        # 計算寫入位置 (RingBuffer 邏輯：snapshot 裡的 head 是"下一個空位"，所以當前數據在 head-1)
         curr_idx = head - 1
+        # 處理邊界條件：如果 head=0，代表剛寫滿或是剛 wrap around，最新數據在最後一格
         if curr_idx < 0: curr_idx = self.capacity - 1
         
-        # 从 snapshot 拿出基礎數據 (直接用 index 取，不做解包變數，省效能)
-        # index 0=close, 3=time
+        # 從 snapshot 拿出基礎數據 (直接用 index 取，不做解包變數，以節省 Python 層的 Overhead)
+        # index 常數對照：0=close, 1=volume, 2=type, 3=time
         close_val = snapshot_tuple[0][curr_idx]
         time_val  = snapshot_tuple[3][curr_idx]
         vol_val   = snapshot_tuple[1][curr_idx]
-        # type=1 (Buy), type=2 (Sell). 
+        
+        # type=1 (Buy), type=2 (Sell), type=0 (Unknown)
         type_val = snapshot_tuple[2][curr_idx]
         # print(f"DEBUG: Vol={snapshot_tuple[1][curr_idx]}, Type={snapshot_tuple[2][curr_idx]}")
 
         # ==========================================
-        # 3. 更新基礎歷史數據 (直接寫入 Array)
+        # 1. 更新基礎歷史數據 (Local RingBuffer Write)
         # ==========================================
         self.history["timestamp"][curr_idx] = time_val
         self.history["close"][curr_idx]     = close_val
         self.history["volume"][curr_idx]    = vol_val
         
         # ==========================================
-        # 4. 執行 Numba 計算 (直接寫入 Array)
+        # 2. 執行 Numba 技術指標計算
         # ==========================================
         for ind_id, calc_func, input_indices, fixed_args in self.executors:
-            # 動態組裝參數 (從 snapshot 裡拿 Array 參照)
+            # A. 動態組裝參數 (從 snapshot tuple 中取出對應的 NumPy Array Reference)
             dynamic_args = [snapshot_tuple[i] for i in input_indices]
             
-            # 呼叫 Numba
+            # B. 呼叫 JIT 編譯函數 (極速運算)
+            # 注意：這裡只計算當前這一個點 (Incremental Calculation)
             val = calc_func(*dynamic_args, head, *fixed_args)
             
-            # 🔥 直接填坑
+            # C. 寫入結果
             self.history[ind_id][curr_idx] = val
 
         # ==========================================
-        # 5. 更新 K 線 (邏輯不變)
+        # 3. 更新 K 線聚合 (Aggregator)
         # ==========================================
         self._update_candles(time_val, close_val, vol_val)
         
         # ==========================================
-        # 6. 更新 Volume Profile (Thread-Safe Update)
+        # 4. 更新高階分析引擎 (Alpha Engines)
         # ==========================================
         
+        # Volume Profile: 價格分佈 (不依賴時間)
         self.vp_engine.update(close_val, vol_val, tick_type=type_val)
         
-        # ==========================================
-        # 7. 更新 Microstructure (Velocity & Imbalance)
-        # ==========================================
+        # Microstructure: 速度與訂單流不平衡 (依賴時間窗)
         self.micro_engine.update(time_val, vol_val, type_val)
-        vel, imb = self.micro_engine.get_metrics()
         
-        # Store in history for plotting/strategy
+        # 取得微結構指標並存檔
+        vel, imb = self.micro_engine.get_metrics()
         self.history['velocity'][curr_idx] = vel
         self.history['imbalance'][curr_idx] = imb
         

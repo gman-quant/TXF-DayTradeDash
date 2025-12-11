@@ -93,47 +93,23 @@ def calc_sma(cum_close: np.ndarray,
     if prev_idx < 0: prev_idx += capacity
     
     # 公式: (累積到現在 - 累積到N筆前) / N
-    # sum_val = P[now] + P[now-1] + ... + P[now-period+1]
-    # PrefixSum[now] = Sum(0...now)
-    # PrefixSum[prev] = Sum(0...now-period)
-    # RangeSum = PrefixSum[now] - PrefixSum[prev]
-    
-    # 注意：這裡假設 cum_close 是持續累加且正確維護的
-    # 如果 head < period (剛啟動資料不足)，理論上 ring buffer 會 wrap around 讀到舊資料 (或是0)
-    # 對於嚴謹的實作，我們可以用 cum_volume 輔助檢查，但這裡求快直接算
     
     # 🩹 優化修正: 檢查 prev_idx 是否指到尚未寫入的區域 (Init Zero)
     # 假設 cum_close[prev_idx] 為 0，代表我們回溯到了尚未有資料的緩衝區
-    # 此時計算出來的 SMA 會是 (Sum / N) 但 Sum 其實只有 partial sum，數值會錯誤(偏小)。
-    # 故回傳 NaN 讓指標暫時無效，直到資料足夠。
     if cum_close[prev_idx] == 0.0:
         return np.nan
 
     sum_val = cum_close[curr_idx] - cum_close[prev_idx]
     
-    # 修正極端情況：如果 cross boundary 導致數值跳變 (通常在 RingBuffer 不會，因為是持續累加)
-    # 可是 TxfRingBuffer 的 cum_close 是這一輪的累積，還是永續累積？
-    # 查看 ring_buffer.py: self.cum_close[idx] = self.cum_close[prev_idx] + price
-    # 它是一個持續累加值。
-    # 潛在問題：如果累加太久 float64 會失去精度，但在日內交易(Day Trading)幾萬筆內通常沒問題。
-    # 另一個問題：RingBuffer 是環狀的，當 head wrap around 回到 0 時，
-    # 舊的 cum_close 會被覆寫。
-    
-    # ⚠️ 修正邏輯：
-    # RingBuffer 的 cum_close 在 wrap around 時會怎樣？
-    # 它是 "Stateful Update": next = prev + curr
-    # 所以即使繞回 index 0, 它的值還是接續 index MAX 的值繼續加上去。
-    # 所以直接相減是安全的，除非... overflow (但 float64 很大)。
-    
-    # 唯一例外：剛啟動時 (head < period)，prev_idx 會指到 array 尾端
-    # 而 array 尾端可能是 0 (還沒寫到)。
-    # 這時減出來會是 sum_val = cum_close[curr] - 0 = cum_close[curr] (從開頭到現在的總合)
-    # 這其實就是 SMA (只是分母應該是 head 而不是 period)。
-    # 為了保持簡單與一致性，我們接受這個短暫的暖機誤差，或者由上層控制 head > period 才呼叫。
+    # ⚠️ 邏輯備註：
+    # RingBuffer 的 cum_close 在 wrap around 時會接續累加 (Stateful Update)，
+    # 所以直接相減是安全的，除非 float64 overflow (機率極低)。
     
     if period == 0: return np.nan
     
     return sum_val / period
+
+
 
 
 
@@ -184,48 +160,24 @@ def binary_search_boundary(timestamps: np.ndarray,
                            target_time: float, 
                            capacity: int) -> int:
     """
-    使用二分搜尋法在 RingBuffer 中尋找時間邊界 (Find first index where ts < target_time)。
+    [演算法核心] 在 RingBuffer 中使用二分搜尋法尋找時間邊界。
     
-    Mapping Strategy:
-    Logical Index 0 = head - 1 (Latest)
-    Logical Index k = head - 1 - k (History)
+    目標：找到最小的 k，使得 timestamps[head - 1 - k] < target_time。
+    (即找到第一個「超出時間視窗」的舊資料點)
     
-    Timestamps in Logical Index sequence are DESCENDING: [T_now, T_now-1, ...]
-    But Binary Search usually works on ASCENDING arrays.
+    挑戰：
+    1. RingBuffer 是環狀的，物理索引不連續。
+    2. 時間戳記是「邏輯遞減」的 (最新在 head-1)，但二分搜通常用於遞增陣列。
     
-    So we search on Logical Index k [0, capacity].
-    Wait, Timestamps array is physically circular but logically Sorted (Monotonic).
+    解決方案：
+    - 對「邏輯索引 k」進行二分搜 (範圍 0 到 capacity)。
+    - 轉換邏輯索引 k -> 物理索引 idx，讀取時間戳。
+    - 因為資料是遞減的 (越來越舊)，若 T[k] >= Target，代表還在視窗內，需要往更舊找 (K 變大)。
     
-    Logical View: 
-    Idx 0:   10:00:05 (Latest)
-    Idx 1:   10:00:04
-    ...
-    Idx N:   09:00:00
-    
-    We want smallest `k` such that timestamp[logical k] < target_time.
-    Since array is DESCENDING, first element < target matches "binary search right side".
-    
-    Let's use classic binary search on Logical Index k.
-    Low = 0, High = capacity - 1 (or valid count)
-    
-    If ts[mid] >= target_time:
-        # We need to go deeper into history (larger k) because array is descending.
-        # But wait, if TS >= Target, it means this point is STILL INSIDE the window.
-        # We want to find OUTSIDE the window.
-        # So we want larger k.
-        Low = mid + 1
-    else:
-        # TS < Target. This point is outside.
-        # Could be the boundary, or something even earlier (smaller k is closer to boundary).
-        # We want the *first* one that is outside.
-        High = mid - 1
-        Ans = mid
-        
+    Returns:
+        int: found_k (視窗內的資料筆數)
     """
     low = 0
-    # Determine search depth: limited by actual valid data count if we had it, 
-    # but lacking that, we assume full capacity or stop at 0.
-    # Better to just search full capacity. Sentinel 0s will be < target_time (since target ~ current time).
     high = capacity - 1 
     
     ans = -1
@@ -233,27 +185,27 @@ def binary_search_boundary(timestamps: np.ndarray,
     while low <= high:
         mid = (low + high) // 2
         
-        # Convert Logical mid to Physical idx
+        # 轉換: 邏輯索引 mid -> 物理索引 idx
         idx = head - 1 - mid
         if idx < 0: idx += capacity
         
         ts = timestamps[idx]
         
-        # Check validity (0 is considered extremely old, so < target_time)
+        # 檢查有效性 (0 代表未初始化的空位，視為「非常舊」)
         if ts == 0:
-            # 0 < target. It is "outside". Try smaller k to find the first outside.
+            # 視為小於 Target (Outside)，嘗試往更近找 (Smaller K)
             ans = mid
             high = mid - 1
             continue
             
         if ts < target_time:
-            # Found a point outside window.
-            # Try to see if there is a smaller k that is also outside (closer to boundary)
+            # 找到視窗外的點了 (Outside)
+            # 嘗試縮小範圍，看有沒有更小的 k 也符合 (希望能精確切在邊界)
             ans = mid
             high = mid - 1
         else:
-            # ts >= target_time. Still inside window.
-            # Need to look further back (larger k).
+            # 還在視窗內 (Inside, ts >= target)
+            # 需要往更深處找 (Larger K)
             low = mid + 1
             
     return ans
@@ -598,17 +550,9 @@ def calc_vwap_bands_linear(close_arr: np.ndarray,
     cum_pv_sq = np.cumsum(pv_sq)
     
     # 3. 處理除以零的情況 (初期無成交量)
-    # 建立一個遮罩，避免 NaN 傳染
-    # 但為了效能，我們可以用一個非常小的 Epsilon 或直接讓它 NaN
-    # 這裡選擇讓初期 Volume=0 的地方保持 NaN
-    
     # 為了計算方便，將 0 的 CumVol 暫時換成 1 (避免 DivZero error)
-    # 最後再把對應的位置填回 NaN
     valid_mask = (cum_vol > 0)
     safe_cum_vol = cum_vol.copy()
-    # Numba 不支援 safe_cum_vol[~valid_mask] = 1.0 進階索引賦值? 
-    # Numba 支援布林索引，但有時會有問題。我們用簡單迴圈處理 "前幾個" 0 即可?
-    # 或者直接除，Numba 會產生 Inf/NaN，我們最後處理。
     
     # 計算 VWAP (E[X])
     vwap_arr = cum_pv / safe_cum_vol
@@ -618,7 +562,6 @@ def calc_vwap_bands_linear(close_arr: np.ndarray,
     variance_arr = mean_sq_arr - (vwap_arr * vwap_arr)
     
     # 數值穩定性修正 (Variance >= 0)
-    # 使用迴圈或 np.maximum (Numba 支援)
     variance_arr = np.maximum(variance_arr, 0.0)
     
     sd_arr = np.sqrt(variance_arr)
@@ -628,12 +571,6 @@ def calc_vwap_bands_linear(close_arr: np.ndarray,
     lower_arr = vwap_arr - (multiplier * sd_arr)
     
     # 4. 修正無效區間 (初期 Volume=0)
-    # 如果 cum_vol[i] == 0, 則結果應為 NaN
-    # 利用 Numba loop 修正或 where (Numba np.where 支援)
-    # 但上面已經除了 0 產生 NaN/Inf，所以可能已經自動變 NaN 了?
-    # 0/0 -> NaN. x/0 -> Inf.
-    # 我們希望保持乾淨。
-    # 簡單用迴圈把前面 cum_vol == 0 的設為 NaN 即可 (通常只有第 0 筆)
-    # 或者如果不修也沒關係，Plotly 會忽略 NaN/Inf。
+    # Plotly 會自動忽略 NaN，無需特別回填特定值
     
     return vwap_arr, upper_arr, lower_arr

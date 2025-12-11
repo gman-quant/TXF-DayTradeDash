@@ -84,7 +84,8 @@ def start_dashboard_server(indicator_manager, port=8050):
     @app.callback(
         [Output('main-chart', 'figure'),
          Output('live-status-panel', 'children'),
-         Output('last-update-timestamp', 'data')],
+         Output('last-update-timestamp', 'data'),
+         Output('scoreboard-state', 'data')],
         [Input('interval-component', 'n_intervals'),
          Input('lookback-slider', 'value'),
          Input('timeframe-dropdown', 'value'),
@@ -106,7 +107,7 @@ def start_dashboard_server(indicator_manager, port=8050):
             # --- 1. Early Peek (效能優化) ---
             # 如果 RingBuffer 為空，顯示等待訊息
             if indicator_manager.count == 0:
-                return NO_DATA_FIGURE, "Waiting for data...", no_update
+                return NO_DATA_FIGURE, "Waiting for data...", no_update, no_update
 
             # 檢查數據是否有更新 (Timestamp Check)
             current_latest_ts = indicator_manager.get_latest_timestamp()
@@ -119,7 +120,7 @@ def start_dashboard_server(indicator_manager, port=8050):
             data_pack = process_market_data(indicator_manager, lookback_count, timeframe)
             
             if not data_pack:
-                return NO_DATA_FIGURE, "Processing Error...", no_update
+                return NO_DATA_FIGURE, "Processing Error...", no_update, no_update
             
             # --- 3. Figure Generation (圖表繪製) ---
             fig = build_combined_figure(data_pack)
@@ -166,20 +167,24 @@ def start_dashboard_server(indicator_manager, port=8050):
             change = last_price - current_prev_close
             change_pct = (change / current_prev_close * 100) if current_prev_close else 0
 
-            scoreboard = create_scoreboard_html(
-                last_price = last_price,
-                change = change,
-                change_pct = change_pct,
-                open_price = open_p,
-                high = get_last_value(hist, 'Session_High'),
-                low  = get_last_value(hist, 'Session_Low'),
-                vol  = get_last_value(hist, 'Total_Vol'),
-                vwap = get_last_value(hist, 'VWAP'),
-                prev_close = current_prev_close,
-                underlying_price = get_last_value(hist, 'Underlying_Price')
-            )
+            # 準備數據包供 HTML 生成
+            sb_data = {
+                'last_price': last_price,
+                'change': change,
+                'change_pct': change_pct,
+                'open_price': open_p,
+                'high': get_last_value(hist, 'Session_High'),
+                'low': get_last_value(hist, 'Session_Low'),
+                'vol': get_last_value(hist, 'Total_Vol'),
+                'vwap': get_last_value(hist, 'VWAP'),
+                'prev_close': current_prev_close,
+                'underlying_price': get_last_value(hist, 'Underlying_Price')
+            }
 
-            return fig, scoreboard, current_latest_ts
+            scoreboard = create_scoreboard_html(**sb_data)
+
+            # [Update] Return 4 outputs
+            return fig, scoreboard, current_latest_ts, sb_data
 
         except PreventUpdate:
             raise
@@ -187,6 +192,190 @@ def start_dashboard_server(indicator_manager, port=8050):
             # 捕捉未預期錯誤，打印 Traceback 但不讓 Server 崩潰
             print(f"❌ Dash Error: {traceback.format_exc()}")
             return NO_DATA_FIGURE, f"System Error: {str(e)}", no_update
+
+    # =========================================================================
+    # 📸 Callback 3: Snapshot Export (HTML 存檔)
+    # =========================================================================
+    @app.callback(
+        Output("download-snapshot", "data"),
+        Input("btn-snapshot", "n_clicks"),
+        [State("main-chart", "figure"),
+         State("scoreboard-state", "data")],
+        prevent_initial_call=True
+    )
+    def export_html_snapshot(n_clicks, fig_data, sb_data):
+        """
+        當按下「Save HTML」按鈕時，將當前圖表匯出為獨立 HTML 檔案。
+        [Enhanced] 現在會包含上方的戰情板數據 (Scoreboard)！
+        """
+        if not fig_data or n_clicks is None:
+            raise PreventUpdate
+            
+        import plotly.graph_objects as go
+        from datetime import datetime
+        
+        # 1. 重建 Figure 物件
+        fig = go.Figure(fig_data)
+        
+        # 2. 生成檔名 (Session Logic)
+        from datetime import timedelta
+        now = datetime.now()
+        ts_str = now.strftime('%Y-%m-%d %H:%M:%S') # [Fix] Define ts_str for HTML template
+        
+        # 判斷盤別 (Day vs Night)
+        # Night Session: 15:00 ~ 05:00 (of next day)
+        if now.hour < 8:
+            # 凌晨時段屬於前一天的夜盤
+            date_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+            suffix = '-n'
+        elif now.hour >= 15:
+            # 下午 3 點後屬於當天的夜盤
+            date_str = now.strftime('%Y-%m-%d')
+            suffix = '-n'
+        else:
+            # 日盤 (08:45 ~ 13:45)
+            date_str = now.strftime('%Y-%m-%d')
+            suffix = ''
+            
+        filename = f"TXF-Chart-{date_str}{suffix}.html"
+        
+        # 3. 建構 HTML 內容 (Header + Plot)
+        def write_full_html():
+            # [Revert] 回復為全黑模式 (Dark Theme)
+            # 強制設定圖表高度與 RWD
+            fig.layout.height = None
+            fig.layout.autosize = True
+            
+            plot_html = fig.to_html(
+                include_plotlyjs='cdn', 
+                full_html=False, 
+                config={'scrollZoom': True, 'displayModeBar': True, 'responsive': True}, 
+                default_height='100%',
+                default_width='100%'
+            )
+            
+            # B. 產生 Scoreboard HTML (完整版)
+            if not sb_data:
+                header_html = "<div style='color:white; text-align:center'>No Data</div>"
+            else:
+                # --- 數據準備 ---
+                price = sb_data.get('last_price', 0)
+                change = sb_data.get('change', 0)
+                pct = sb_data.get('change_pct', 0)
+                vol = sb_data.get('vol', 0)
+                high = sb_data.get('high', 0)
+                low = sb_data.get('low', 0)
+                prev_close = sb_data.get('prev_close', 0)
+                open_p = sb_data.get('open_price', 0)
+                vwap = sb_data.get('vwap', 0)
+                u_price = sb_data.get('underlying_price', 0)
+                
+                # --- 邏輯計算 (Dark Mode) ---
+                main_color = '#2ECC40' if change >= 0 else '#FF4136'
+                sign = '+' if change >= 0 else ''
+                
+                gap = open_p - prev_close
+                gap_color = '#2ECC40' if gap >= 0 else '#FF4136'
+                gap_sign = '+' if gap >= 0 else ''
+                
+                basis = price - u_price
+                basis_color = '#FFF000'
+                basis_sign = '+' if basis >= 0 else ''
+                
+                vwap_dev_pct = ((price / vwap) - 1) * 100 if vwap else 0.0
+                if vwap_dev_pct >= 0.2: dev_color = '#2ECC40'
+                elif vwap_dev_pct <= -0.2: dev_color = '#FF4136'
+                else: dev_color = '#BBBBBB'
+                
+                chg_open = price - open_p
+                chg_open_color = '#2ECC40' if chg_open >= 0 else '#FF4136'
+                chg_open_sign = '+' if chg_open >= 0 else ''
+                
+                day_range = high - low
+
+                # --- HTML 模板 (Dark Context) ---
+                header_html = f"""
+                <div style="background-color: #1E1E1E; color: white; padding: 15px; border-radius: 10px; border: 1px solid {main_color}; margin-bottom: 20px; font-family: sans-serif; display: flex; justify-content: center; align-items: center;">
+                    
+                    <!-- [Left] Price Block -->
+                    <div style="margin-right: 50px; text-align: center;">
+                        <div style="font-size: 48px; font-weight: bold; color: {main_color}; line-height: 1;">{price:,.0f}</div>
+                        <div style="font-size: 20px; color: {main_color}; margin-top: 8px;">{sign}{change:.0f} ({sign}{pct:.2f}%)</div>
+                        <div style="font-size: 12px; color: #888; margin-top: 8px;">{ts_str}</div>
+                    </div>
+                    
+                    <!-- [Right] Full Info Grid (4 Columns) -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px 40px; text-align: left; font-size: 14px; line-height: 1.6; color: #BBB;">
+                        
+                        <!-- Col 1: Boundary -->
+                        <div>
+                            <div><span style="color:#BBB;">最高: </span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
+                            <div><span style="color:#BBB;">最低: </span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
+                            <div><span style="color:#BBB;">波幅: </span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
+                        </div>
+
+                        <!-- Col 2: Anchors -->
+                        <div>
+                            <div><span style="color:#BBB;">昨收: </span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
+                            <div><span style="color:#BBB;">開盤: </span><span style="color:#FFF;">{open_p:,.0f}</span></div>
+                            <div><span style="color:#BBB;">跳空: </span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                        </div>
+
+                        <!-- Col 3: Momentum -->
+                        <div>
+                            <div><span style="color:#BBB;">VWAP: </span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
+                            <div><span style="color:#BBB;">開盤漲跌: </span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
+                            <div><span style="color:#BBB;">VWAP Dev: </span><span style="color:{dev_color};">{vwap_dev_pct:.2f}%</span></div>
+                        </div>
+
+                        <!-- Col 4: Context -->
+                        <div>
+                            <div><span style="color:#BBB;">現貨價: </span><span style="color:#FFF;">{u_price:,.0f}</span></div>
+                            <div><span style="color:#BBB;">基　差: </span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
+                            <div><span style="color:#BBB;">總　量: </span><span style="color:#FFF;">{vol:,.0f}</span></div>
+                        </div>
+                    </div>
+                </div>
+                """
+                
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Gale Snapshot {ts_str}</title>
+                <style>
+                    body {{ 
+                        background-color: #111; 
+                        color: #ddd; 
+                        margin: 0; 
+                        padding: 20px; 
+                        font-family: sans-serif; 
+                        height: 100vh; 
+                        display: flex; 
+                        flex-direction: column; 
+                        box-sizing: border-box; 
+                    }}
+                    h2 {{ text-align: center; color: #fff; margin: 0 0 15px 0; font-size: 24px; }}
+                    
+                    /* Force plot to take remaining space (Responsive) */
+                    .plotly-graph-div {{ 
+                        flex: 1; 
+                        width: 100%; 
+                        height: 85vh !important; 
+                    }}
+                </style>
+            </head>
+            <body>
+                <h2>🚀 TXF Gale Snapshot</h2>
+                {header_html}
+                {plot_html}
+            </body>
+            </html>
+            """
+            return full_html
+            
+        return dict(content=write_full_html(), filename=filename)
 
     # 啟動 Flask Server
     app.run(debug=False, port=port, host='0.0.0.0', use_reloader=False)

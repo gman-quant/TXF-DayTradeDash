@@ -4,13 +4,17 @@ import plotly.graph_objects as go
 from config.ui_theme import UI_COLOR
 
 # =============================================================================
-# 🎨 Chart Renderers
-# Encapsulates the logic for creating Plotly Traces.
+# 🎨 Chart Renderers (繪圖渲染器)
+# 封裝所有 Plotly Trace 的建立邏輯，讓 chart.py 保持乾淨。
 # =============================================================================
 
 def add_main_price_chart(fig, data, row=1, col=1):
     """
-    Render the main price chart (Candlestick or OHLC).
+    繪製主圖價格 K 線 (Candlestick)
+    
+    邏輯：
+    - 若週期包含 's' (秒級)，視為高頻數據，使用 OHLC 線圖 (效能較好)。
+    - 否則使用標準 Candlestick (紅綠 K 棒)。
     """
     current_tf = data.get('timeframe', '1m')
     is_high_freq = 's' in current_tf
@@ -33,49 +37,48 @@ def add_main_price_chart(fig, data, row=1, col=1):
             increasing_line_color=UI_COLOR['UP'], decreasing_line_color=UI_COLOR['DOWN'],
             increasing_fillcolor=UI_COLOR['UP'], decreasing_fillcolor=UI_COLOR['DOWN'],
             
+            # 簡潔版 Tooltip
             hovertemplate=(
                 '<b>%{x|%H:%M:%S}</b><br>' +
                 'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
                 'V: %{text}' +
                 '<extra></extra>' 
             ),
-            text=[f'{v:,}' for v in data['candles']['volume']] # Simple volume text
+            text=[f'{v:,}' for v in data['candles']['volume']] # 預先格式化成交量字串
         ), row=row, col=col)
 
 def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     """
-    Render a line overlay (SMA, VWAP, etc.).
+    繪製疊加指標 (SMA, VWAP, Bands...)
     """
     ind_id = ind_config['id']
+    # 根據 State 計算的 Step 進行降頻繪製
     y_data = data['history'][ind_id][data['start_idx']::data['step']]
-    
-    # Default visibility logic can be passed in or handled here
-    # For simplicity, we assume the caller handles logic or we hardcode defaults here
-    # But to keep it pure, let's just render what is asked.
-    # We can pass 'visible' as a kwarg if needed.
     
     trace_kwargs = dict(
         x=data['tick_x'], y=y_data, mode='lines', name=ind_id,
         line=dict(color=ind_config['color'], width=1, dash=ind_config.get('style', 'solid')),
     )
     
-    # Optional Legend Group
+    # 用於 Legend Group 切換 (e.g. 點擊 VWAP 可同時切換 Upper/Lower)
     if 'legendgroup' in ind_config:
         trace_kwargs['legendgroup'] = ind_config['legendgroup']
-        # If part of a group, we might want to toggle together.
-        # Plotly default behavior: if legendgroup is set, clicking one toggles all in group.
     
+    # 使用 WebGL 加速渲染 (Scattergl)
     fig.add_trace(go.Scattergl(**trace_kwargs), row=row, col=col)
 
 def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1, col=1):
     """
-    Render Volume Profile (Histogram + Levels).
-    x_range: (start, end) tuple for drawing horizontal lines.
+    繪製 Volume Profile (直方圖 + 關鍵價位)
+    
+    Args:
+        vp_data: 包含 prices, volumes, poc, vah, val 的字典
+        x_range: 用於繪製水平線的 X 軸起訖點
     """
     if not vp_data or len(vp_data['prices']) == 0:
         return
 
-    # 1. Key Levels (POC, VAH, VAL) -> Lines
+    # 1. 繪製關鍵價位線 (POC, VAH, VAL)
     if x_range:
         x_start, x_end = x_range
         levels = [
@@ -94,47 +97,44 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
                     name=name,
                     legendgroup=legend_group,
                     showlegend=False, 
-                    hoverinfo='name+y'
+                    hoverinfo='name+y' # 只顯示名稱與價格
                 ), row=row, col=col)
     
     prices = vp_data['prices']
     volumes = vp_data['volumes']
     
-    # Check if Delta Profile data is available
+    # 檢查是否有 Delta Profile 數據 (買賣分量)
     has_delta = 'buy_volumes' in vp_data and len(vp_data['buy_volumes']) > 0
     
     if has_delta:
         buy_vols = vp_data['buy_volumes']
         sell_vols = vp_data['sell_volumes']
+        total_vols = vp_data['volumes'] 
         
-        buy_vols = vp_data['buy_volumes']
-        sell_vols = vp_data['sell_volumes']
-        total_vols = vp_data['volumes'] # Need Total for the trick
+        # 視覺疊加技巧 (Visual Stacking Trick):
+        # 由於 Overlay 模式下 Bar 會互相遮擋，我們利用繪製順序來模擬 Stack 效果。
+        # 1. 先畫總量 (綠色)：代表 Buy，因為 Sell 會蓋在上面，剩下的綠色就是 Buy。
+        # 2. 再畫賣量 (紅色)：疊加在總量之上。
+        # 視覺效果：[紅色區塊(Sell)][綠色區塊(剩餘的Buy)]
         
-        # Strategy: Simulate Stacking in Overlay Mode
-        # Layer 1 (Bottom): Draw TOTAL Volume -> Color it GREEN (Buy)
-        # Layer 2 (Top):    Draw SELL Volume  -> Color it RED (Sell)
-        # Visual Result:    [ Red (covers bottom) ] [ Green (remainder) ]
-        
-        # 2a. Layer 1: Total (Green)
-        # User sees this as "Buy Vol" (the green part sticking out)
+        # Layer 1: Total Volume (顯示為 Buy Color, Green)
         fig.add_trace(go.Bar(
             y=prices,
             x=total_vols,
-            customdata=buy_vols, # Pass real Buy Vol for tooltip
+            customdata=buy_vols, # 傳入真實 Buy Vol 供 tooltip 顯示正確數值
             orientation='h',
-            xaxis='x3',
+            xaxis='x3',     # 使用專用的 VP X軸
             yaxis='y',
             name='Buy Vol',
             width=bin_size * 0.95,
-            marker_color='rgba(0, 230, 118, 0.1)', # Green
+            marker_color='rgba(0, 230, 118, 0.1)', # 綠色 (加上透明度)
             marker_line_width=0,
             hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
             showlegend=True
         ))
         
-        # 2b. Layer 2: Sell (Red)
+        # Layer 2: Sell Volume (顯示為 Sell Color, Red)
         fig.add_trace(go.Bar(
             y=prices,
             x=sell_vols,
@@ -143,7 +143,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             yaxis='y',
             name='Sell Vol',
             width=bin_size * 0.95,
-            marker_color='rgba(255, 82, 82, 0.25)', # Red opacity increased to 0.25
+            marker_color='rgba(255, 82, 82, 0.25)', # 紅色
             marker_line_width=0,
             hovertemplate='<b>Sell Vol</b>: %{x:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
@@ -151,7 +151,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
         ))
         
     else:
-        # 2. Bar Chart (Total only fallback)
+        # Fallback: 若無買賣分量，只畫單一灰階 Bar
         fig.add_trace(go.Bar(
             y=prices, 
             x=volumes,
@@ -168,21 +168,25 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
         ))
 
 class OscillatorRenderers:
-    """Namespace for Oscillator visualization logic."""
+    """
+    [Namespace] 副圖指標渲染器集合
+    chart.py 會使用 getattr 動態呼叫這些方法。
+    """
     
     @staticmethod
     def render_cvd(fig, x_data, y_data, config, row, col):
+        """繪製 CVD (累積成交量差)"""
         group_name = "cvd_group"
         ind_id = config['id']
         
-        # Main Line
+        # 主線
         fig.add_trace(go.Scattergl(
             x=x_data, y=y_data, mode='lines', name=ind_id,
             line=dict(color=config['color'], width=1.0), 
             legendgroup=group_name, showlegend=True, legendrank=4
-        ), row=row, col=col, secondary_y=True)
+        ), row=row, col=col, secondary_y=True) # 使用右軸
         
-        # Fill Area
+        # 填充區域 (Zero Line area fill)
         y_pos = np.maximum(0, y_data)
         y_neg = np.minimum(0, y_data)
         common_fill = dict(mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 215, 0, 0.05)', hoverinfo='skip', legendgroup=group_name, showlegend=False)
@@ -192,14 +196,17 @@ class OscillatorRenderers:
 
     @staticmethod
     def render_retail_flow(fig, x_data, y_data, config, row, col):
+        """繪製散戶單 (<5口) 柱狀圖"""
         bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (< 5)",
             marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=1
-        ), row=row, col=col, secondary_y=False)
+        ), row=row, col=col, secondary_y=False) # 使用左軸
 
     @staticmethod
     def render_smart_money(fig, x_data, y_data, config, row, col):
+        """繪製大戶單 (>=5口) 柱狀圖"""
+        # 使用特殊配色區分大戶
         cols = np.where(y_data >= 0, "#8C5B00", "#006D91")
         fig.add_hline(y=0, line_width=1, line_color="#555", row=row, col=col)
         fig.add_trace(go.Bar(
@@ -209,6 +216,8 @@ class OscillatorRenderers:
 
     @staticmethod
     def render_whale_nuke(fig, x_data, y_data, config, row, col):
+        """繪製特大單 (>=15口) 柱狀圖"""
+        # 使用高亮色 (Neon)
         cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF")
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (>= 15)",
