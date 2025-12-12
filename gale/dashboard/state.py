@@ -116,9 +116,11 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         import gale.alpha.engine as ne
         close_arr = view_history['close']
         vol_arr = view_history['volume']
+        # [Session-Aware Fix] Pass timestamp for reset detection
+        ts_arr = view_history['timestamp'] 
         
         # Calculate +2.0 SD Bands
-        vwap, upper, lower = ne.calc_vwap_bands_linear(close_arr, vol_arr, 2.0)
+        vwap, upper, lower = ne.calc_vwap_bands_linear(close_arr, vol_arr, ts_arr, 2.0)
         
         view_history['VWAP_Upper'] = upper
         view_history['VWAP_Lower'] = lower

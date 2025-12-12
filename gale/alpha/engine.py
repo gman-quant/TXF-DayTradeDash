@@ -532,45 +532,69 @@ def calc_small_lot_net(vol_arr: np.ndarray,
 @jit(nopython=True, cache=True, fastmath=True)
 def calc_vwap_bands_linear(close_arr: np.ndarray, 
                            vol_arr: np.ndarray, 
+                           timestamp_arr: np.ndarray,
                            multiplier: float) -> tuple:
     """
-    計算 VWAP 及上下通道 (VWAP Bands) - Vectorized Optimized
+    計算 VWAP 及上下通道 (Bands) - Session Aware
     
-    Returns:
-        (vwap_arr, upper_arr, lower_arr)
+    Logic:
+    迭代計算，當偵測到時間斷層 (> 2小時) 時，
+    自動歸零累計值 (Sum_PV, Sum_Vol, Sum_PV_Sq)，實現 Session Reset。
     """
-    # 1. 基礎向量運算
-    # 避免 Numba warning，轉換型別 (雖然通常不用)
-    pv = close_arr * vol_arr
-    pv_sq = close_arr * close_arr * vol_arr
+    n = len(close_arr)
     
-    # 2. 累積總和 (Prefix Sum) - O(N)
-    cum_vol = np.cumsum(vol_arr)
-    cum_pv = np.cumsum(pv)
-    cum_pv_sq = np.cumsum(pv_sq)
+    # 預分配結果陣列
+    vwap_arr = np.full(n, np.nan, dtype=np.float64)
+    upper_arr = np.full(n, np.nan, dtype=np.float64)
+    lower_arr = np.full(n, np.nan, dtype=np.float64)
     
-    # 3. 處理除以零的情況 (初期無成交量)
-    # 為了計算方便，將 0 的 CumVol 暫時換成 1 (避免 DivZero error)
-    valid_mask = (cum_vol > 0)
-    safe_cum_vol = cum_vol.copy()
+    # 累計器狀態
+    sum_pv = 0.0
+    sum_vol = 0.0
+    sum_pv_sq = 0.0
     
-    # 計算 VWAP (E[X])
-    vwap_arr = cum_pv / safe_cum_vol
+    # Session Reset Threshold (2 hours in ms)
+    SESSION_GAP_THRESHOLD = 7200000 
     
-    # 計算 Variance (E[X^2] - (E[X])^2)
-    mean_sq_arr = cum_pv_sq / safe_cum_vol
-    variance_arr = mean_sq_arr - (vwap_arr * vwap_arr)
-    
-    # 數值穩定性修正 (Variance >= 0)
-    variance_arr = np.maximum(variance_arr, 0.0)
-    
-    sd_arr = np.sqrt(variance_arr)
-    
-    # 計算 Bands
-    upper_arr = vwap_arr + (multiplier * sd_arr)
-    lower_arr = vwap_arr - (multiplier * sd_arr)
-    
-    # 4. 修正無效區間 (初期 Volume=0)
-    # Plotly 會自動忽略 NaN，無需特別回填特定值
-    
+    for i in range(n):
+        # 1. Session Reset Check
+        if i > 0:
+            dt = timestamp_arr[i] - timestamp_arr[i-1]
+            if dt > SESSION_GAP_THRESHOLD:
+                # [Reset State]
+                sum_pv = 0.0
+                sum_vol = 0.0
+                sum_pv_sq = 0.0
+                
+        # 2. Accumulate
+        p = close_arr[i]
+        v = vol_arr[i]
+        
+        # Skip invalid data (e.g. initial zeros in buffer)
+        if p == 0.0: 
+            continue
+            
+        pv = p * v
+        pv_sq = p * p * v
+        
+        sum_pv += pv
+        sum_vol += v
+        sum_pv_sq += pv_sq
+        
+        # 3. Calculate VWAP & StdDev
+        if sum_vol > 0:
+            vwap = sum_pv / sum_vol
+            
+            # Variance = E[X^2] - (E[X])^2
+            # Mean_Sq = Sum(P^2 * V) / Sum(V)
+            mean_sq = sum_pv_sq / sum_vol
+            variance = mean_sq - (vwap * vwap)
+            
+            if variance < 0: variance = 0.0
+            std_dev = np.sqrt(variance)
+            
+            vwap_arr[i] = vwap
+            upper_arr[i] = vwap + (multiplier * std_dev)
+            lower_arr[i] = vwap - (multiplier * std_dev)
+            
     return vwap_arr, upper_arr, lower_arr
