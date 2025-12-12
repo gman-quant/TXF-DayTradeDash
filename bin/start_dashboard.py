@@ -1,9 +1,14 @@
 import time
 import sys
+import os
 import logging
 import threading
 import argparse
 import signal
+
+# Add project root to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from gale.infra.memory import SharedRingBuffer
 from gale.alpha.handler import IndicatorManager
 from gale.dashboard.server import start_dashboard_server
@@ -81,10 +86,10 @@ class DashboardRunner:
         sync_thread.start()
         
         # 2. 啟動 Dashboard (Blocking Main Thread)
-        logger.info("📊 Starting Dashboard Server...")
+        logger.info(f"📊 Starting Dashboard Server on port {self.args.port}...")
         try:
             # 這裡會卡住 Main Thread 直到結束
-            start_dashboard_server(self.manager, port=8050)
+            start_dashboard_server(self.manager, port=self.args.port)
         except Exception as e:
             logger.error(f"Dashboard Server Error: {e}")
         finally:
@@ -97,6 +102,7 @@ class DashboardRunner:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--topic', type=str, default='txf-tick')
+    parser.add_argument('--port', type=int, default=8050, help="Dashboard port")
     args = parser.parse_args()
     
     runner = DashboardRunner(args)
