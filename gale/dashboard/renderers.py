@@ -204,10 +204,10 @@ class OscillatorRenderers:
         ), row=row, col=col, secondary_y=False) # 使用左軸
 
     @staticmethod
-    def render_medium_lot(fig, x_data, y_data, config, row, col):
-        """繪製中單淨量 (Medium Lot >=5口) 柱狀圖"""
-        # 使用特殊配色區分大戶
-        cols = np.where(y_data >= 0, "#8C5B00", "#006D91")
+    def render_large_lot(fig, x_data, y_data, config, row, col):
+        """繪製大單 (Large Lot >=5口) 柱狀圖"""
+        # 雙色區分：Buy=深棕色, Sell=深藍 (對比強烈且專業)
+        cols = np.where(y_data >= 0, '#8C5B00', '#006D91')
         fig.add_hline(y=0, line_width=1, line_color="#555", row=row, col=col)
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (>= 5)",
@@ -215,10 +215,10 @@ class OscillatorRenderers:
         ), row=row, col=col, secondary_y=False)
 
     @staticmethod
-    def render_large_lot(fig, x_data, y_data, config, row, col):
-        """繪製大單淨量 (Large Lot >=15口) 柱狀圖"""
-        # 使用高亮色 (Neon)
-        cols = np.where(y_data >= 0, "#FB00FF", "#00FFFF")
+    def render_mega_lot(fig, x_data, y_data, config, row, col):
+        """繪製特大單 (Mega Lot >=15口) 柱狀圖"""
+        # 雙色區分：Buy=洋紅(Neon), Sell=青色(Neon) -> 極度醒目
+        cols = np.where(y_data >= 0, '#FB00FF', '#00FFFF')
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (>= 15)",
             marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3

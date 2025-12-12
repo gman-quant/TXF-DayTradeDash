@@ -168,24 +168,25 @@ INDICATORS_SETUP = [
         'style': 'bar'
     },
 
-    # 2. 🟡 中單淨量 (Medium Lot Net)
-    # 監控 >= 5 口的常規大單。
-    # [Upgraded] 使用 effective_volume 還原真實動能。
+    # 2. 🟡 大單 (Large Lot)
+    # 監控 >= 5 口的所有大單 (包含特大單)。
+    # [Inclusive] 標準法人單，顯示為黃色系。
     {
-        'id': 'Medium_Lot', 
-        'func': 'calc_large_lot_net',
+        'id': 'Large_Lot', 
+        'func': 'calc_large_lot_net', # Inclusive
         'type': TYPE_OSCILLATOR,
-        'color': '#FFFF00',  # 黃色
+        'color': '#FFD700',  # 金黃色
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # >= 5
         'yaxis': 'y',
         'style': 'bar'
     },
 
-    # 3. 🔴 大單淨量 (Large Lot Net)
-    # 監控 >= 15 口的極端大單。
+    # 3. 🔴 特大單 (Mega Lot)
+    # 監控 >= 15 口的極端大單 (Large Lot 的子集)。
+    # [Highlight] 顯示為紅色系，疊加在黃色之上，代表極高強度。
     {
-        'id': 'Large_Lot',
+        'id': 'Mega_Lot',
         'func': 'calc_large_lot_net',
         'type': TYPE_OSCILLATOR,
         'color': '#FF0000',  # 紅色
@@ -193,7 +194,9 @@ INDICATORS_SETUP = [
         'args': [250, 15],   # >= 15
         'yaxis': 'y',
         'style': 'bar'
-    }
+    },
+
+
 
     
 
