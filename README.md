@@ -88,15 +88,58 @@ V1.0 版本統一使用 `bin.start_engine` 作為入口：
 python -m bin.start_engine
 ```
 
-### 2. 歷史回測模式 (History Mode)
+### 2. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]
+ 
+ V1.1 新增了基於 Parquet 檔案的高效回放引擎，支援多日連續回放與靜態全歷史分析。
+ 
+ #### (A) 即時模擬回測 (Realtime Simulation)
+ 
+ 模擬真實盤中時間流逝，用於觀察策略與指標的動態變化。
+ 
+ ```bash
+ # 播放單日 (預設速度 1.0x)
+ python bin/start_engine.py --source parquet --date 2025-12-08
+ 
+ # 播放多日連續行情 (e.g. 12/08 ~ 12/11)
+ python bin/start_engine.py --source parquet --date 2025-12-08 --end-date 2025-12-11
+ ```
+ 
+ #### (B) 極速全歷史分析 (Instant Load / Static Analysis)
+ 
+ 忽略時間間隔，以極限速度 (Speed=0) 將指定日期範圍的所有資料一次性載入記憶體。
+ 適用於進行這幾天的 K 線全貌分析、Volume Profile 分佈研究，或快速驗證指標邏輯。
+ 
+ ```bash
+ # 加上 --speed 0 啟用極速模式 (數十萬筆資料秒開)
+ python bin/start_engine.py --source parquet --date 2025-12-08 --end-date 2025-12-11 --speed 0
+ ```
+ 
+ > **💡 Smart CLI Behavior:**
+ > *   若直接輸入 `--date`，系統自動判斷為 **Parquet Source**。
+ > *   若需跑 Kafka 的歷史模式，請明確指定 `--mode history`。
+ 
+ > **💡 New Features:**
+ > *   **Smart Resolution**: 系統會自動根據日期尋找 TXF (期貨) 與 TSE (加權指數) 的 Parquet 檔案。
+ > *   **Dynamic Capacity**: Shared Memory 會根據載入天數自動擴容 (e.g. 4 天 -> 80 萬筆容量)，確保資料不遺失。
+ > *   **Session Awareness**: 指標 (VWAP, High/Low) 會在每日及夜盤開盤時自動重置。
+  
+  *(Legacy Kafka History Mode 仍保留，透過 `--mode history` 呼叫)*
 
-指定日期，全速回放當天數據以驗證邏輯。
+-----
 
-```bash
-python -m bin.start_engine --mode history --date 2025-12-09 --session day
-```
+## ⚙️ 參數說明 (Arguments Reference)
 
-*加上 `--session night` 可回測夜盤。*
+| Argument | Value | Description |
+| :--- | :--- | :--- |
+| **`--source`** | `kafka` (**Default**) | **實時模式 (Live Mode)**。連接 Kafka 接收交易所即時行情。 |
+| | `parquet` | **回放模式 (Replay Mode)**。讀取 Parquet 檔案進行回測或分析。 |
+| **`--speed`** | `0` (**Default**) | **極速載入 (Instant)**。自動全速載入資料 (Static Analysis)。 |
+| | `1.0` | **即時模擬 (Realtime)**。依據歷史時間間隔播放，模擬盤中節奏。 |
+| | `> 1.0` | **倍速播放 (Fast Forward)**。例如 `5.0` 代表 5 倍速快轉。 |
+| `--date` | `YYYY-MM-DD` | 指定回放起始日期 (Parquet Mode 必填)。 |
+| `--end-date` | `YYYY-MM-DD` | 指定回放結束日期 (選填，若無則只回放單日)。 |
+| **`--mode`** | `live` (**Default**) | **實時監控**。正常盤中運作模式 (Kafka Live)。 |
+| | `history` | **歷史回測**。用於 Legacy Kafka 回放 (需明確指定)。 |
 
 -----
 

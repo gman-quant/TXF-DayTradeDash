@@ -241,7 +241,11 @@ class CoreSupervisor:
                 
         logger.info("All processes terminated.")
 
-if __name__ == "__main__":
+def parse_cli_args():
+    """
+    解析並處理 CLI 參數。
+    封裝了 Smart Auto-Detection 邏輯。
+    """
     parser = argparse.ArgumentParser(description="TXF Gale Engine (Unified Launcher)")
     
     # [Data Source]
@@ -264,10 +268,23 @@ if __name__ == "__main__":
     parser.add_argument('--speed', type=float, default=0, help="Replay Speed")
     
     args = parser.parse_args()
+
+    # [Smart Logic]
+    # If user provides --date but no source, assume Parquet Replay (better UX).
+    # BUT, if user explicitly asked for --mode history, respect Kafka (Legacy).
+    if args.date and args.source == 'kafka' and args.mode == 'live':
+        # Check if user explicitly typed --source kafka (rare for date usage)
+        if '--source' not in sys.argv:
+            print("✨ Auto-Switching to Parquet Replay Mode (detected --date)")
+            args.source = 'parquet'
     
     # [Auto Default Topic]
     if not args.topic:
         args.topic = 'txf-replay' if args.source == 'parquet' else 'txf-tick'
-    
+        
+    return args
+
+if __name__ == "__main__":
+    args = parse_cli_args()
     supervisor = CoreSupervisor(args)
     supervisor.run()
