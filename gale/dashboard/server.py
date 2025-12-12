@@ -40,7 +40,8 @@ def start_dashboard_server(indicator_manager, port=8050):
     NO_DATA_FIGURE = create_blank_figure()
 
     app = dash.Dash(__name__)
-    app.layout = create_main_layout()
+    # [Dynamic Lookback] Pass max buffer capacity to layout for slider config
+    app.layout = create_main_layout(max_capacity=indicator_manager.capacity)
 
     # =========================================================================
     # 🎮 Callback 1: Viewport & Zoom Management (視野控制)

@@ -20,21 +20,22 @@ except ImportError:
     logger.error("❌ Polars not installed. Please run: pip install polars")
     sys.exit(1)
 
-def run_replay(parquet_file, topic, speed_factor=1.0, underlying_file=None):
+def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=200000):
     """
-    Parquet 回放器主邏輯 (Polars High Performance Version)
+    Parquet 回放器主邏輯 (Multi-Day Support)
     Args:
-        parquet_file: Parquet 檔案路徑
-        topic: 用於建立 Shared Memory 名稱 (gale_shm_{topic})
-        speed_factor: 回放速度 (1.0 = 原速, 0 = 極速)
-        underlying_file: 加權指數 Parquet 檔 (Optional)
+        parquet_files: Parquet 檔案路徑列表
+        topic: 用於建立 Shared Memory 名稱
+        speed_factor: 回放速度
+        underlying_files: 加權指數 Parquet 檔列表 (Optional)
+        capacity: RingBuffer 容量
     """
     
-    # 1. 載入數據 (TXF)
-    logger.info(f"📂 Loading parquet file (Polars): {parquet_file}")
+    # 1. 載入數據 (TXF) - Multi-File Support
+    logger.info(f"📂 Loading {len(parquet_files)} parquet files (Polars)...")
     try:
-        # Lazy Loading if file is huge, but eager is fine for daily data (<1GB)
-        df = pl.read_parquet(parquet_file)
+        # 使用 scan_parquet 處理多檔案
+        df = pl.scan_parquet(parquet_files).collect()
         
         # [Schema Adaptation]
         # 1. Rename columns map
@@ -108,17 +109,17 @@ def run_replay(parquet_file, topic, speed_factor=1.0, underlying_file=None):
         # Sort
         df = df.sort("timestamp")
             
-        logger.info(f"✅ Loaded {len(df)} ticks. Range: {df['timestamp'][0]} ~ {df['timestamp'][-1]}")
+        logger.info(f"✅ Loaded Total {len(df)} ticks. Range: {df['timestamp'][0]} ~ {df['timestamp'][-1]}")
         
     except Exception as e:
         logger.error(f"Failed to load parquet: {e}")
         return
 
     # 1.5 載入加權指數 (TSE) - Optional Merge
-    if underlying_file:
-        logger.info(f"📉 Loading Underlying (TSE): {underlying_file}")
+    if underlying_files:
+        logger.info(f"📉 Loading Underlying (TSE) - {len(underlying_files)} files...")
         try:
-            df_tse = pl.read_parquet(underlying_file)
+            df_tse = pl.scan_parquet(underlying_files).collect()
             
             # 適配 TSE 格式
             tse_rename = {}
@@ -164,7 +165,20 @@ def run_replay(parquet_file, topic, speed_factor=1.0, underlying_file=None):
     # 2. 初始化 Shared Memory
     shm_name = f"gale_shm_{topic}"
     try:
-        ring_buffer = SharedRingBuffer(name=shm_name, capacity=200000, create=True)
+        # [Cleanup] Force clean existing SHM to avoid FileExistsError
+        from multiprocessing.shared_memory import SharedMemory
+        try:
+            existing_shm = SharedMemory(name=shm_name)
+            existing_shm.unlink()
+            logger.info(f"🧹 Cleaned up stale Shared Memory: {shm_name}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to unlink existing SHM: {e}")
+
+        # [Multi-Day] Use dynamic capacity
+        logger.info(f"💾 Initializing Shared Ring Buffer (Capacity: {capacity})...")
+        ring_buffer = SharedRingBuffer(name=shm_name, capacity=capacity, create=True)
         # Try to find prev_close from polars df if exists
         # if 'prev_close' in df.columns: ...
         logger.info(f"✅ Shared Buffer Created: {shm_name}")
@@ -177,7 +191,13 @@ def run_replay(parquet_file, topic, speed_factor=1.0, underlying_file=None):
     logger.info("✨ Using Enhanced Session-Aware Logic for indicators.")
     
     batch_buffer = []
-    BATCH_SIZE = 1000 # Increase batch size for efficiency
+    # [Performance Adjustment] 
+    # Batch Size controls flush frequency. 
+    # Instant Mode (speed=0): Huge batch (10000) for instant load.
+    # Realtime Mode (speed>0): Small batch (20) for smooth tick updates.
+    BATCH_SIZE = 10000 if speed_factor <= 0 else 20
+    
+    logger.info(f"⚡ Batch Size set to {BATCH_SIZE} (Speed: {speed_factor})") 
     
     start_wall_time = time.time()
     
@@ -239,17 +259,22 @@ def run_replay(parquet_file, topic, speed_factor=1.0, underlying_file=None):
                 current_data_time = ts / 1000.0
                 elapsed_data = current_data_time - start_data_time
                 target_wall_time = start_wall_time + (elapsed_data / speed_factor)
-                
                 now = time.time()
-                if now < target_wall_time:
+                if now < target_wall_time and count < 2000: # Log debug for start
                     sleep_sec = target_wall_time - now
-                    if sleep_sec > 0.001:
-                        time.sleep(sleep_sec)
+                    # logger.info(f"DEBUG: Sleeping {sleep_sec:.4f}s (Data Elapsed: {elapsed_data:.2f})") # Too noisy
+                    if sleep_sec > 0.001: time.sleep(sleep_sec)
+                elif now < target_wall_time:
+                    sleep_sec = target_wall_time - now
+                    if sleep_sec > 0.001: time.sleep(sleep_sec)
 
             # A. 呼叫標準寫入 (寫入 Basic Data)
-            # 這裡要注意：write_batch 會自動更新 head，我們需要記錄寫入前的 head
             start_head = ring_buffer.head
             ring_buffer.write_batch(batch_buffer)
+            
+            # [Debug First Write]
+            if count == 0:
+                logger.info(f"✅ First Batch Written! Head: {ring_buffer.head}")
             
             # B. [Critical] 覆寫 Session-Aware Indicators
             # 因為 write_batch 不懂 Session Reset，我們手動覆蓋
@@ -356,10 +381,15 @@ def run_replay(parquet_file, topic, speed_factor=1.0, underlying_file=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('file', help="Parquet file path")
+    # [Multi-Day] Accept list of files
+    parser.add_argument('files', nargs='+', help="Parquet file path(s)")
     parser.add_argument('--topic', default='txf-tick', help="Topic name for SHM")
     parser.add_argument('--speed', type=float, default=1.0, help="Replay speed (1.0=Realtime, 0=Max)")
-    parser.add_argument('--underlying', help="Path to Underlying (TSE) parquet file", default=None)
+    # [Multi-Day] Accept list of underlying files
+    parser.add_argument('--underlying', nargs='*', help="Path to Underlying (TSE) parquet file(s)", default=None)
+    # [Multi-Day] Capacity
+    parser.add_argument('--capacity', type=int, default=200000, help="Ring Buffer Capacity")
     
     args = parser.parse_args()
-    run_replay(args.file, args.topic, args.speed, args.underlying)
+    
+    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity)

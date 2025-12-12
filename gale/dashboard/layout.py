@@ -42,10 +42,13 @@ PANEL_STYLE = {
 # 🏗️ Main Layout Structure (主頁面佈局)
 # =============================================================================
 
-def create_main_layout():
+def create_main_layout(max_capacity=200000):
     """
     建構 Dash 應用的主要 Layout 結構。
     包含：Header, Scoreboard, Controls, Main Chart, Hidden Stores
+    
+    Args:
+        max_capacity: Slider 的最大範圍 (對應 Shared Memory 容量)
     """
     
     # 準備 Dropdown 選項
@@ -53,6 +56,23 @@ def create_main_layout():
 
     # 初始化空白圖表 (避免載入時白屏)
     initial_figure = create_blank_figure()
+    
+    # [Dynamic Slider Marks]
+    # 根據 capacity 自動計算刻度
+    marks = {}
+    steps = [0.02, 0.1, 0.25, 0.5, 0.75, 1.0] # 2%, 10%, 25%, 50%, 75%, 100%
+    for s in steps:
+        val = int(max_capacity * s)
+        # Simplify label (K/M)
+        if val >= 1_000_000:
+            label = f"{val/1_000_000:.1f}M"
+        elif val >= 1000:
+            label = f"{val/1000:.0f}K"
+        else:
+            label = str(val)
+        marks[val] = label
+        
+    start_val = min(2000, max_capacity)
 
     return html.Div(
         style={
@@ -93,8 +113,8 @@ def create_main_layout():
                         html.Label("📊 Lookback Window", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Slider(
                             id='lookback-slider',
-                            min=2000, max=100000, step=2000, value=100000,
-                            marks={2000: '2K', 10000: '10K', 25000: '25K', 50000: '50K', 100000: '100K'},
+                            min=start_val, max=max_capacity, step=2000, value=max_capacity,
+                            marks=marks,
                             tooltip={"placement": "bottom", "always_visible": True}
                         )
                     ]),

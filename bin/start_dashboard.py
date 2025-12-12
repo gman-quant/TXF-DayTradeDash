@@ -33,8 +33,9 @@ class DashboardRunner:
         # 1. Connect to Shared Memory (Reader)
         while self.running:
             try:
-                self.ring_buffer = SharedRingBuffer(name=self.shm_name, capacity=200000, create=False)
-                logger.info(f"✅ Dashboard Connected to Shared Buffer: {self.shm_name}")
+                # [Multi-Day] Use dynamic capacity from args
+                self.ring_buffer = SharedRingBuffer(name=self.shm_name, capacity=self.args.capacity, create=False)
+                logger.info(f"✅ Dashboard Connected to Shared Buffer: {self.shm_name} (Cap: {self.args.capacity})")
                 break
             except Exception:
                 logger.warning(f"Waiting for Shared Buffer '{self.shm_name}'...")
@@ -42,7 +43,7 @@ class DashboardRunner:
         
         # 2. Initialize Indicator Manager (Independent Instance)
         # 這裡會維護一份自己的指標運算狀態，與 Strategy 分開
-        self.manager = IndicatorManager(buffer_capacity=200000)
+        self.manager = IndicatorManager(buffer_capacity=self.args.capacity)
         self.manager.ring_buffer = self.ring_buffer # [New] Attach for access to metadata (prev_close)
         self.local_cursor = 0
 
@@ -103,6 +104,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--topic', type=str, default='txf-tick')
     parser.add_argument('--port', type=int, default=8050, help="Dashboard port")
+    # [Multi-Day] Add capacity argument
+    parser.add_argument('--capacity', type=int, default=200000, help="RingBuffer Capacity")
     args = parser.parse_args()
     
     runner = DashboardRunner(args)

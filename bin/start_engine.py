@@ -6,7 +6,10 @@ import signal
 import time
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# Fix ModuleNotFoundError
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gale.strategy.engine import StrategyServer
 
@@ -14,6 +17,27 @@ from gale.utils.log_utils import setup_logger
 
 # Logging
 logger = setup_logger("Supervisor")
+
+# Helper for path resolution
+def resolve_parquet_path(date_str, symbol):
+    """
+    Resolve Parquet path based on Data Lake structure:
+    {ROOT}/{SYMBOL}/{YYYY}/{MM}/{YYYY-MM-DD}_{SYMBOL}_ticks.parquet
+    """
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        year = dt.strftime('%Y')
+        month = dt.strftime('%m')
+        
+        # Hardcoded Data Lake Root
+        DATA_LAKE_ROOT = "/Users/gtai/Projects/txf-data-lake/data/raw_ticks"
+        
+        path = f"{DATA_LAKE_ROOT}/{symbol}/{year}/{month}/{date_str}_{symbol}_ticks.parquet"
+        logger.info(f"🔍 Resolving {symbol} {date_str} -> {path}")
+        return path
+    except Exception as e:
+        logger.warning(f"Path resolution failed for {date_str}: {e}")
+        return None
 
 class CoreSupervisor:
     """
@@ -50,55 +74,90 @@ class CoreSupervisor:
             # [Parquet Replay Mode]
             logger.info("📡 Data Source: Parquet Replay")
             
+            txf_files = []
+            tse_files = []
+            
             # [Smart Path Resolution]
-            # 如果使用者只給日期 (--date)，嘗試自動推算 Data Lake 路徑
-            target_file = self.args.file
-            target_underlying = self.args.underlying
-            
-            if self.args.date and not target_file:
-                # e.g. 2025-12-01
+            if self.args.date:
+                # Date Range Logic
+                start_date_str = self.args.date
+                # Check if end_date exists in args (it should if parser updated)
+                end_date_str = getattr(self.args, 'end_date', None)
+                if not end_date_str: end_date_str = start_date_str
+                
                 try:
-                    dt = datetime.strptime(self.args.date, '%Y-%m-%d')
-                    start_year = dt.strftime('%Y')
-                    start_month = dt.strftime('%m')
+                    start_dt = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+                    end_dt = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    logger.error(f"❌ Invalid date format. Please use YYYY-MM-DD.")
+                    sys.exit(1)
                     
-                    # Hardcoded Data Lake Root (User's Environment)
-                    DATA_LAKE_ROOT = "/Users/gtai/Projects/txf-data-lake/data/raw_ticks"
+                if end_dt < start_dt:
+                    logger.error("❌ End date cannot be before start date.")
+                    sys.exit(1)
                     
-                    # TXF Path
-                    target_file = f"{DATA_LAKE_ROOT}/TXF/{start_year}/{start_month}/{self.args.date}_TXF_ticks.parquet"
-                    logger.info(f"🔍 Auto-Resolved TXF Path: {target_file}")
+                delta = end_dt - start_dt
+                days_count = delta.days + 1
+                logger.info(f"📅 Resolving data for {days_count} days: {start_date_str} to {end_date_str}")
+                
+                for i in range(days_count):
+                    current_date = start_dt + timedelta(days=i)
+                    ymd = current_date.strftime("%Y-%m-%d")
                     
-                    # TSE Path (Auto-resolve if not provided)
-                    if not target_underlying:
-                        target_underlying = f"{DATA_LAKE_ROOT}/TSE/{start_year}/{start_month}/{self.args.date}_TSE_ticks.parquet"
-                        logger.info(f"🔍 Auto-Resolved TSE Path: {target_underlying}")
+                    # Resolve TXF
+                    f_txf = resolve_parquet_path(ymd, "TXF")
+                    if f_txf and os.path.exists(f_txf):
+                        txf_files.append(f_txf)
+                    else:
+                        logger.warning(f"⚠️ Warning: TXF file not found for {ymd}: {f_txf}")
                         
-                except Exception as e:
-                    logger.warning(f"Failed to resolve path from date: {e}")
-
-            # [Pre-flight Check] File Existence
-            if not target_file or not os.path.exists(target_file):
-                logger.error(f"❌ Critical Error: Parquet file not found: {target_file}")
-                logger.error("   Please check the date or provide --file manually.")
-                sys.exit(1) # Early Exit
+                    # Resolve TSE (Underlying)
+                    f_tse = resolve_parquet_path(ymd, "TSE") 
+                    if f_tse and os.path.exists(f_tse):
+                        tse_files.append(f_tse)
+                    
+            elif self.args.file:
+                # Manual single file
+                txf_files.append(self.args.file)
+                if self.args.underlying:
+                    tse_files.append(self.args.underlying)
+            else:
+                logger.error("❌ Error: You must provide either --file or --date for parquet replay.")
+                sys.exit(1)
                 
-            if target_underlying and not os.path.exists(target_underlying):
-                logger.warning(f"⚠️ Warning: Underlying file not found: {target_underlying}")
-                logger.warning("   Replay will continue without Underlying Price data.")
-                target_underlying = None # Disable underlying if not found
-
-            cmd = [sys.executable, "-m", "gale.feed.parquet",
-                   str(target_file),
-                   "--topic", self.args.topic,
-                   "--speed", str(self.args.speed)]
+            # Check if we have valid files
+            if not txf_files:
+                logger.error("❌ Critical: No valid TXF parquet files found.")
+                sys.exit(1)
+                
+            logger.info(f"✅ Found {len(txf_files)} TXF files.")
             
-            if target_underlying:
-                cmd.extend(["--underlying", target_underlying])
+            # [Dynamic Capacity Calculation]
+            # Default 200k per day is safe.
+            # We calculate: 200,000 * num_files. Minimum 200,000.
+            calc_capacity = max(200000, 200000 * len(txf_files))
+            logger.info(f"Calculated shared memory capacity: {calc_capacity} ticks.")
+            self.capacity = calc_capacity # Store for Dashboard
+
+            # Construct Command
+            cmd = [sys.executable, "-m", "gale.feed.parquet"]
+            cmd.extend(txf_files) 
+            
+            if tse_files:
+                cmd.append("--underlying")
+                cmd.extend(tse_files) 
                 
+            cmd.extend(["--capacity", str(calc_capacity)])
+            cmd.extend(["--topic", self.args.topic])
+            cmd.extend(["--speed", str(self.args.speed)])
+            
+            logger.info(f"Starting Ingestion Process: {' '.join(cmd)}")
+            self.ingest_process = subprocess.Popen(cmd)
+
         else:
             # [Kafka Live/History Mode]
             logger.info("📡 Data Source: Kafka Consumer")
+            self.capacity = 200000 # Default for Kafka
             prev_close = self._load_prev_close()
             cmd = [sys.executable, "-m", "gale.feed.server", 
                    "--broker", self.args.broker,
@@ -113,8 +172,8 @@ class CoreSupervisor:
                 if self.args.session:
                     cmd.extend(["--session", self.args.session])
         
-        logger.info(f"Starting Ingestion Process: {' '.join(cmd)}")
-        self.ingest_process = subprocess.Popen(cmd)
+            logger.info(f"Starting Ingestion Process: {' '.join(cmd)}")
+            self.ingest_process = subprocess.Popen(cmd)
 
     def start_dashboard(self):
         """啟動 Dashboard Process (獨立進程)"""
@@ -123,9 +182,13 @@ class CoreSupervisor:
         # Parquet Replay -> 8051
         port = 8051 if self.args.source == 'parquet' else 8050
         
+        # [Capacity] Use self.capacity calculated in start_ingestion
+        capacity = getattr(self, 'capacity', 200000)
+
         cmd = [sys.executable, "-m", "bin.start_dashboard", 
                "--topic", self.args.topic,
-               "--port", str(port)]
+               "--port", str(port),
+               "--capacity", str(capacity)]
         
         logger.info(f"Starting Dashboard Process: {' '.join(cmd)}")
         self.dash_process = subprocess.Popen(cmd)
@@ -140,7 +203,13 @@ class CoreSupervisor:
         try:
             # 1. Start Ingestion Subprocess
             self.start_ingestion()
-            time.sleep(1) 
+            
+            # [Health Check] Wait and see if Feed crashes immediately
+            time.sleep(2)
+            if self.ingest_process.poll() is not None:
+                logger.error(f"❌ Feed Process Crashed! Return Code: {self.ingest_process.returncode}")
+                # We can't easily read stderr here without pipe, but user should see it in terminal.
+                sys.exit(1)
             
             # 2. Start Dashboard Subprocess (New!)
             self.start_dashboard()
@@ -186,12 +255,13 @@ if __name__ == "__main__":
     parser.add_argument('--group', type=str, default='gale_v1_unified')
     parser.add_argument('--mode', type=str, default='live', choices=['live', 'history'])
     parser.add_argument('--date', type=str, help='YYYY-MM-DD for history mode')
+    parser.add_argument('--end-date', type=str, help='End Date YYYY-MM-DD for multi-day replay')
     parser.add_argument('--session', type=str, default='day', choices=['day', 'night'])
     
     # [Parquet Args]
     parser.add_argument('--file', type=str, help="Parquet File Path")
     parser.add_argument('--underlying', type=str, help="Underlying (TSE) Parquet File Path")
-    parser.add_argument('--speed', type=float, default=1.0, help="Replay Speed")
+    parser.add_argument('--speed', type=float, default=0, help="Replay Speed")
     
     args = parser.parse_args()
     
