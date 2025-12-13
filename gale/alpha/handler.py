@@ -250,12 +250,13 @@ class IndicatorManager:
         
         # 從 snapshot 拿出基礎數據 (直接用 index 取，不做解包變數，以節省 Python 層的 Overhead)
         # index 常數對照：0=close, 1=volume, 2=type, 3=time
-        close_val = snapshot_tuple[0][curr_idx]
-        time_val  = snapshot_tuple[3][curr_idx]
-        vol_val   = snapshot_tuple[1][curr_idx]
+        # [Fix Overflow] Cast to native Python types immediately to avoid NumPy Scalar overflow in accumulators
+        close_val = float(snapshot_tuple[0][curr_idx])
+        time_val  = int(snapshot_tuple[3][curr_idx])
+        vol_val   = int(snapshot_tuple[1][curr_idx])
         
         # type=1 (Buy), type=2 (Sell), type=0 (Unknown)
-        type_val = snapshot_tuple[2][curr_idx]
+        type_val = int(snapshot_tuple[2][curr_idx])
         # print(f"DEBUG: Vol={snapshot_tuple[1][curr_idx]}, Type={snapshot_tuple[2][curr_idx]}")
 
         # ==========================================

@@ -57,12 +57,16 @@ def create_main_layout(max_capacity=200000):
     # 初始化空白圖表 (避免載入時白屏)
     initial_figure = create_blank_figure()
     
+    # [User Request] Lookback Window Max should be half of capacity
+    # (Capacity is over-provisioned, e.g. 200k for 1 day, but actual ticks ~50-80k)
+    slider_max = max_capacity // 2
+    
     # [Dynamic Slider Marks]
-    # 根據 capacity 自動計算刻度
+    # 根據 slider_max 自動計算刻度
     marks = {}
     steps = [0.02, 0.1, 0.25, 0.5, 0.75, 1.0] # 2%, 10%, 25%, 50%, 75%, 100%
     for s in steps:
-        val = int(max_capacity * s)
+        val = int(slider_max * s)
         # Simplify label (K/M)
         if val >= 1_000_000:
             label = f"{val/1_000_000:.1f}M"
@@ -72,7 +76,7 @@ def create_main_layout(max_capacity=200000):
             label = str(val)
         marks[val] = label
         
-    start_val = min(2000, max_capacity)
+    start_val = min(2000, slider_max)
 
     return html.Div(
         style={
@@ -113,7 +117,7 @@ def create_main_layout(max_capacity=200000):
                         html.Label("📊 Lookback Window", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Slider(
                             id='lookback-slider',
-                            min=start_val, max=max_capacity, step=2000, value=max_capacity,
+                            min=start_val, max=slider_max, step=2000, value=slider_max,
                             marks=marks,
                             tooltip={"placement": "bottom", "always_visible": True}
                         )

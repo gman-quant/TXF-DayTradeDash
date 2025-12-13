@@ -1,0 +1,112 @@
+# 📉 機構級趨勢轉折邏輯與路線圖 (Institutional Trend Reversal Logic & Roadmap)
+
+> **Core Philosophy**: 真正的轉折不僅僅是指標上的「超賣 (Oversold)」。它是 **統計極端值 (Statistical Extremes)**、**流動性耗盡 (Liquidity Exhaustion)** 與 **結構性失衡 (Structural Imbalance)** 三者交會的結果。
+
+---
+
+## 1. 核心邏輯：頂級機構如何識別轉折 (How Institutions Spot Reversals)
+
+### A. 微結構與訂單流 (Microstructure & Order Flow) - 毫秒級戰場
+這些訊號代表了市場在毫秒級別的物理機制與真實供需。
+
+1.  **Order Book Imbalance (OBI / LOB 失衡)**
+    *   **邏輯**：「流動性牆 (Liquidity Wall)」。當價格急跌時，如果 LOB (Limit Order Book) 的買方 (Bid side) 突然顯著變厚 (掛單量大增)，這物理上阻止了價格進一步下跌。
+    *   **訊號**：市場賣單 (Market Sells) 被限價買單 (Limit Buys) 大量吸收 (Absorption)。
+
+2.  **Iceberg Detection (冰山單偵測 / 隱藏流動性)**
+    *   **邏輯**：價格停滯在某個 Tick 跳動，儘管有激進的市價單狂敲。Best Ask 表面上只掛了很少的量，但成交量卻不斷累計放大。
+    *   **訊號**：「吸收 (Absorption)」。某個大戶正在隱密地重新掛單 (Reloading)。一旦攻擊者的子彈耗盡，價格就會反轉。
+
+3.  **CVD Divergence (累計成交量背離)**
+    *   **邏輯**：「努力 vs 結果 (Effort vs Result)」。價格創出新低，但 CVD (Cumulative Volume Delta) 卻呈現較高低點 (Higher Low)。
+    *   **訊號**：賣方還在用力賣 (Effort)，但已經推不動價格了 (No Result)，這意味著賣壓衰竭或被完全吸收。
+
+### B. 統計套利 (Statistical Arbitrage) - 數學回歸
+量化基金 (Quant Funds) 依賴統計異常值的均值回歸 (Mean Reversion)。
+
+1.  **Basis Reversion (基差回歸)**
+    *   **邏輯**：期貨與現貨 (如台指期 vs 加權指數) 的價差 (Basis) 不可能無限擴大。
+    *   **訊號**：Z-Score > 3。套利者 (Arbitrageurs) 會進場鎖定價差，強制將價格拉回。
+
+2.  **VWAP Bands (成交量加權平均價乖離)**
+    *   **邏輯**：VWAP 是機構法人的「公允價格 (Fair Price)」。
+    *   **訊號**：當價格觸及 VWAP +/- 2.0 或 3.0 個標準差 (SD) 時，代表價格處於「流動性真空 (Liquidity Vacuum)」，這種移動通常是不穩定的，極易發生報復性反彈 (Snap back)。
+
+### C. 拍賣市場理論 (Auction Market Theory) - 市場心理
+
+1.  **Failed Auction (拍賣失敗 / Look Above and Fail)**
+    *   **邏輯**：價格突破關鍵價位 (例如昨日高點) 但無法吸引新的買盤 (量能萎縮)。
+    *   **訊號**：價格被迅速拒絕 (Rejection) 並跌回原本的價值區間。目標價通常會直接殺到區間的另一端。
+
+2.  **Buying/Selling Tails (長尾效應)**
+    *   **邏輯**：TPO 或 Volume Profile 圖上出現單一且細長的長下影線。
+    *   **訊號**：機構法人在該價位進行了強烈的防守或拒絕 (Rejection)。
+
+---
+
+## 2. 現有能力：如何使用 Gale Engine 實戰
+
+我們的 **TXF Gale Engine (v1.1)** 已經具備實踐上述策略的強大工具。
+
+### ✅ 可用工具 (Available Tools)
+
+| 功能 (Feature) | 引擎組件 (Component) | 狀態 |
+| :--- | :--- | :--- |
+| **CVD / Delta** | `MicrostructureEngine` | **Ready**. 計算每筆 Tick 的買賣失衡。 |
+| **VWAP Bands** | `AlphaEngine` | **Ready**. 支援 Session-aware 的 VWAP +/- 2.0 SD。 |
+| **Volume Profile** | `VolumeProfileEngine` | **Ready**. 即時計算 POC/VAH/VAL 價值區。 |
+| **Velocity** | `MicrostructureEngine` | **Ready**. 監控交易速率 (Vol/Sec) 以偵測恐慌。 |
+
+### 🛠 實戰策略指南 (Strategy Construction)
+
+#### 策略 1: "力竭背離" (The Exhausted Divergence) - 極短線 (Scalping)
+*   **概念**：當微結構顯示「賣壓耗盡」時，接住掉下來的刀子。
+*   **觸發條件**: 
+    1.  價格 < `VWAP - 2.0 SD` (統計極端)。
+    2.  價格創 Session 新低。
+    3.  `MicrostructureEngine.imbalance` > -0.2 (賣壓減弱) 或 CVD 斜率轉正。
+*   **執行**: 在 Best Bid 掛限價單承接。
+
+#### 策略 2: "價值區防守" (Value Area Defense) - 波段 (Swing)
+*   **概念**：在上升趨勢中，回檔到「公允價格」邊界時買進。
+*   **觸發條件**:
+    1.  價格回測 `VolumeProfileEngine.VAL` (價值區下緣)。
+    2.  成交量顯著萎縮 (Dry up / 惜售)。
+*   **執行**: 當價格重新勾回價值區內時進場 (Ticket back inside)。
+
+#### 策略 3: "基差收斂" (Basis Arb Snap) - 均值回歸
+*   **概念**：簡單的價差套利。
+*   **觸發條件**:
+    1.  `Tick.close` 與 `Tick.underlying_price` 的價差 > X 點。
+    2.  `MicrostructureEngine.velocity` 飆升 (恐慌性殺盤或拉抬)。
+*   **執行**: 反向操作 (Fade the move)。
+
+---
+
+## 3. 未來路線圖：最後的拼圖 (Missing Pieces)
+
+要達到頂級 HFT/Prop Desk 的水準，我們需要補齊以下拼圖：
+
+### 🚧 Priority 1: LOB 整合 (Order Book Integration) -> [Next Milestone]
+*   **目標**：我們需要 **委託報價數據 (Bid/Ask Quotes)**，而不僅僅是成交數據 (Trades)。
+*   **原因**：成交數據是「過去式」，委託簿才能看到「未來式」(流動性牆)。
+*   **任務**: 
+    *   接入 5 檔 (或全檔) Order Book 數據。
+    *   計算 **OBI (訂單簿不平衡)** 指標。
+    *   在 Dashboard 上視覺化深度圖 (Heatmap)。
+
+### 🚧 Priority 2: 冰山單偵測器 (Iceberg Detector)
+*   **目標**：偵測隱藏的大單執行。
+*   **演算法**:
+    *   監控特定價位，若滿足：
+        *   `Delta` 變化巨大 (成交量大)。
+        *   `Price` 卻在 N 毫秒內完全不變。
+    *   標記該價位為 "Absorption Zone" (吸籌/出貨區)。
+
+### 🚧 Priority 3: VPIN (知情交易機率)
+*   **目標**：一種預測崩盤或劇烈波動的「毒性流向 (Flow Toxicity)」指標。
+*   **實作**: 複雜的量化演算法，基於成交量桶 (Volume Buckets) 的買賣失衡機率。
+
+---
+
+> **Summary**: 目前我們在 **成交分析 (Trade Analysis)** 上已經很強 (What happened)，但在 **流動性分析 (Liquidity Analysis)** 上還較弱 (What is pending)。Gale Engine 的下一個重大進化就是 **LOB (Order Book) 整合**。

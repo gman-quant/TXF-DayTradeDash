@@ -89,7 +89,8 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'open': candles['open'][candle_start_idx:],
         'high': candles['high'][candle_start_idx:],
         'low':  candles['low'][candle_start_idx:],
-        'close': candles['close'][candle_start_idx:]
+        'close': candles['close'][candle_start_idx:],
+        'volume': candles['volume'][candle_start_idx:]
     }
     
     # 合併尚未結算的「即時 K 線」 (Current Candle)
