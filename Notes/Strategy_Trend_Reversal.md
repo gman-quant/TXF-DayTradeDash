@@ -83,30 +83,48 @@
 
 ---
 
-## 3. 未來路線圖：最後的拼圖 (Missing Pieces)
+## 3. 未來路線圖：最後的拼圖 (The Final Piece: LOB Integration)
 
-要達到頂級 HFT/Prop Desk 的水準，我們需要補齊以下拼圖：
+現在我們有了 `txf.BidAsk` 數據 (包含 `diff_bid_vol` 與 `diff_ask_vol`)，我們可以實作真正的機構級轉折策略。
 
-### 🚧 Priority 1: LOB 整合 (Order Book Integration) -> [Next Milestone]
-*   **目標**：我們需要 **委託報價數據 (Bid/Ask Quotes)**，而不僅僅是成交數據 (Trades)。
-*   **原因**：成交數據是「過去式」，委託簿才能看到「未來式」(流動性牆)。
-*   **任務**: 
-    *   接入 5 檔 (或全檔) Order Book 數據。
-    *   計算 **OBI (訂單簿不平衡)** 指標。
-    *   在 Dashboard 上視覺化深度圖 (Heatmap)。
+### 🚀 Phase 1: 基礎 LOB 指標 (Fundamental LOB Metrics)
 
-### 🚧 Priority 2: 冰山單偵測器 (Iceberg Detector)
-*   **目標**：偵測隱藏的大單執行。
-*   **演算法**:
-    *   監控特定價位，若滿足：
-        *   `Delta` 變化巨大 (成交量大)。
-        *   `Price` 卻在 N 毫秒內完全不變。
-    *   標記該價位為 "Absorption Zone" (吸籌/出貨區)。
+| 指標 | 邏輯 (Logic) | 轉折訊號 (Reversal Signal) |
+| :--- | :--- | :--- |
+| **OBI (Order Book Imbalance)** | `(BidVol - AskVol) / (BidVol + AskVol)` | **背離 (Divergence)**: 價格創新低，但 OBI 底部墊高 (買單掛入接刀)。 |
+| **Liquidity Wall (流動性牆)** | 偵測 `Bid/Ask Volume` 中的異常大單 (Outliers)。 | **拒絕 (Rejection)**: 價格觸碰大單價位後迅速反彈 (Ping off the wall)。 |
+| **OFI (Order Flow Imbalance)** | $\sum(Bid_{Add} - Bid_{Remove}) - \sum(Ask_{Add} - Ask_{Remove})$ | **淨流量反轉**: 價格還在跌，但 OFI 已經翻正 (Limit Order 積極佈局)。 |
 
-### 🚧 Priority 3: VPIN (知情交易機率)
-*   **目標**：一種預測崩盤或劇烈波動的「毒性流向 (Flow Toxicity)」指標。
-*   **實作**: 複雜的量化演算法，基於成交量桶 (Volume Buckets) 的買賣失衡機率。
+### 🚀 Phase 2: 進階轉折策略 (Advanced Reversal Strategies)
+
+這些策略利用 `diff` 數據來偵測「意圖 (Intent)」。
+
+#### 策略 4: "假突破反轉" (The Spoofing Reversal)
+*   **情境**: 價格試圖突破區間上緣。
+*   **微結構特徵**:
+    1.  價格上漲時，上方 Ask 突然出現大量掛單 (阻力增強)。
+    2.  同時，下方 Bid 的支撐單突然 **撤銷 (`diff_bid_vol` < 0)** (虛假支撐消失)。
+*   **訊號**: 價格突破失敗 (Look Above and Fail) + Bid 撤單 = **強烈放空訊號**。
+
+#### 策略 5: "吸籌背離" (Absorption Divergence)
+*   **情境**: 下跌趨勢末端。
+*   **微結構特徵**:
+    1.  市價賣單 (CVD 下降) 持續湧入。
+    2.  但 `Best Bid` 價格不跌，且 `diff_bid_vol` 持續為正 (Reloading/Iceberg)。
+*   **訊號**: CVD 創新低 + Price Higher Low + Bid Reloading = **強烈做多訊號**。
+
+#### 策略 6: "流動性真空回補" (Vacuum Snap-back)
+*   **情境**: 發生瞬間崩盤 (Flash Crash) 或急拉。
+*   **微結構特徵**:
+    1.  某一方的 Book 瞬間被打穿 (Thin Liquidity)。
+    2.  隨後快速在遠端出現厚實的掛單 (Providing Liquidity)。
+*   **訊號**: V型反轉確認，回補流動性真空區。
 
 ---
+
+> **Implementation Priority**:
+> 1.  **OBI Stream**: 計算即時多空掛單比。
+> 2.  **Depth Map**: 視覺化流動性牆。
+> 3.  **Spoofing Detector**: 監控 `diff` 異常撤單。
 
 > **Summary**: 目前我們在 **成交分析 (Trade Analysis)** 上已經很強 (What happened)，但在 **流動性分析 (Liquidity Analysis)** 上還較弱 (What is pending)。Gale Engine 的下一個重大進化就是 **LOB (Order Book) 整合**。

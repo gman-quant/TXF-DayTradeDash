@@ -47,18 +47,29 @@ class IngestServer:
             sys.exit(1)
             
         # 2. Initialize Kafka Consumer
+        # [LOB Integration] Subscribe to both Tick and BidAsk
+        topics = [args.topic, 'txf-bidask']
+        logger.info(f"Subscribing to topics: {topics}")
+        
         self.consumer = GaleKafkaConsumer(
             broker_url=args.broker,
             group_id=args.group,
-            topics=[args.topic]
+            topics=topics
         )
+        
+        # 3. [LOB Integration] Initialize LOB Engine
+        from gale.alpha.lob import LOBEngine
+        self.lob_engine = LOBEngine()
         
         # Pre-allocate Tick object for reuse
         self.current_tick = Tick()
 
     async def start(self):
-        """Main Loop"""
+        """Main Loop (Strict Micro-Sync Sequencer)"""
         self.consumer.connect()
+        
+        # Import Proto here to be safe
+        from data_schemas.txf_data_pb2 import BidAsk
         
         if self.args.mode == 'history':
             # [History Mode] Seek to specific historical session
@@ -69,19 +80,14 @@ class IngestServer:
             
             start_offset, end_offset = get_history_range(self.args.date, self.args.session)
             logger.info(f"🕰 Time Machine Mode: Replaying {self.args.date} ({self.args.session})")
-            logger.info(f"Target Range: {start_offset} -> {end_offset}")
             
             try:
                 self.consumer.seek_to_time(start_offset)
-                # Note: We don't limit end time here, but we could add logic in the loop to stop.
-                # For now, let's assume it just plays until end of available data for that day.
             except Exception as e:
                 logger.error(f"Failed to seek history: {e}")
                 
         else:
             # [Live Mode]
-            # 🛑 邏輯修正：自動 Seek 到當前盤別的開盤點
-            # 這樣才能確保從開盤開始的資料都有被寫入，而不只是從現在開始
             start_offset, session_status = get_current_session_offset()
             logger.info(f"Session Check: Status={session_status}, StartOffset={start_offset}")
     
@@ -96,55 +102,114 @@ class IngestServer:
         logger.info("🚀 Ingestion Server (Writer) Started...")
         
         processed_count = 0
-        write_tick = self.ring_buffer.write_tick # Bound method cache
+        quote_count = 0 
+        forced_flush_count = 0
+        
+        # [Sync Buffer]
+        pending_ticks = []  # Buffer for ticks waiting for quotes
+        MAX_TICK_WAIT_MS = 50 # Max wait time for a tick before forcing write (Lag Safety)
         
         try:
             async for batch_msgs in self.consumer.consume_stream(running_check=lambda: self.running):
                 if not self.running: break
-                
-                # Parse all messages in batch
-                valid_ticks = []
-                reached_history_end = False
                 
                 # Pre-calc end timestamp if in history mode
                 end_ts_ms = None
                 if self.args.mode == 'history' and 'end_offset' in locals():
                     end_ts_ms = int(end_offset.timestamp() * 1000)
 
-                for raw_bytes in batch_msgs:
+                # --- 1. Process Messages (Sequencer) ---
+                for msg in batch_msgs:
+                    # Check completion
+                    # (Simplified: check if ANY message is past end time? Or just Ticks?)
+                    # Usually checking Ticks is enough for termination.
+                    
+                    topic = msg.topic()
+                    raw_bytes = msg.value()
+                    
                     try:
-                        t = Tick()
-                        t.ParseFromString(raw_bytes)
-                        
-                        # [History Mode] Check End Time
-                        if end_ts_ms and t.timestamp_ms > end_ts_ms:
-                            reached_history_end = True
-                            logger.info(f"🛑 Reached session end time: {end_offset}. Stopping ingestion.")
-                            break
+                        if topic == 'txf-bidask':
+                            # --- Quote Handling ---
+                            q = BidAsk()
+                            q.ParseFromString(raw_bytes)
+                            self.lob_engine.update(q)
+                            quote_count += 1
                             
-                        valid_ticks.append(t)
-                        processed_count += 1
+                        elif topic == self.args.topic: # 'txf-tick'
+                            # --- Tick Handling ---
+                            t = Tick()
+                            t.ParseFromString(raw_bytes)
+                            
+                            if end_ts_ms and t.timestamp_ms > end_ts_ms:
+                                logger.info(f"🛑 Reached session end time via Tick: {end_offset}.")
+                                self.running = False
+                                break
+                            
+                            # Add to pending buffer
+                            pending_ticks.append(t)
+                            
                     except Exception as e:
                         logger.error(f"Processing Error: {e}")
+
+                # --- 2. Flushing Logic (Micro-Sync) ---
+                # Check pending ticks against LOB Watermark
                 
-                # 🔥 Vectorized Write
-                if valid_ticks:
-                    self.ring_buffer.write_batch(valid_ticks)
+                ready_ticks = []
+                ready_lob_metrics = [] # [Fix] Parallel list for LOB data
+                remaining_ticks = []
+                
+                # Watermark from LOB Engine
+                max_quote_ts = self.lob_engine.max_seen_ts
+                
+                current_forced = False
+                
+                for t in pending_ticks:
+                    tick_ts = t.timestamp_ms
+                    
+                    # Condition: Safe to write if we have seen quotes BEYOND this tick
+                    is_safe = (max_quote_ts >= tick_ts)
+                    
+                    # Force Condition: If Tick is too old compared to 'current processing'?
+                    # Or simpler: if we have buffered too many ticks (e.g. > 100000), force flush to prevent OOM
+                    # [Tuning] High volume bursts require larger buffer
+                    is_forced = (len(pending_ticks) > 100000) 
+                    
+                    if is_safe or is_forced:
+                        if is_forced: current_forced = True
+                        
+                        # [Sampling]
+                        obi, ofi, lag = self.lob_engine.get_metrics(tick_ts)
+                        
+                        ready_ticks.append(t)
+                        ready_lob_metrics.append((obi, ofi, lag)) # Store tuple
+                    else:
+                        remaining_ticks.append(t)
+                
+                if current_forced:
+                    forced_flush_count += 1
+                
+                # Commit ready ticks
+                if ready_ticks:
+                    self.ring_buffer.write_batch(ready_ticks, lob_data=ready_lob_metrics)
+                    processed_count += len(ready_ticks)
+                    
+                # Update buffer
+                pending_ticks = remaining_ticks
                 
                 # Batch log
-                n_batch = len(valid_ticks)
-                if n_batch > 0 and (processed_count % 10000 < n_batch):
-                     logger.info(f"Written batch {n_batch} ticks. Total: {processed_count}. Latest: {valid_ticks[-1].close/10000.0}")
-                
-                # If we reached the end, stop the consumer loop but keep process alive
-                if reached_history_end:
-                    logger.info("✅ History Replay Completed. Keeping Shared Memory alive for analysis...")
-                    # Close consumer to release network resources
-                    self.consumer.close()
-                    # Enter Keep-Alive Loop
-                    while self.running:
-                        await asyncio.sleep(1)
-                    break # Exit normally if running becomes False
+                if processed_count > 0 and (processed_count % 5000 < len(ready_ticks)):
+                     logger.info(f"Processed Ticks: {processed_count}, Quotes: {quote_count}, Pending: {len(pending_ticks)}, Forced Flushes: {forced_flush_count}. LOB Watermark: {max_quote_ts}")
+
+                if not self.running:
+                    break
+                    
+            # End of loop
+            logger.info("✅ Ingestion Completed.")
+            self.consumer.close()
+            
+            # Keep alive
+            while self.running:
+                await asyncio.sleep(1)
                     
         except asyncio.CancelledError:
             logger.info("Ingestion task cancelled.")

@@ -8,6 +8,7 @@ gale/dashboard/chart.py
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import numpy as np
 import gale.dashboard.renderers as renderers
 
 # Helper
@@ -51,14 +52,18 @@ def build_combined_figure(data):
     if data is None:
         return create_blank_figure()
         
-    # 1. 建立子圖框架 (2 Rows)
+    # 1. 建立子圖框架 (3 Rows)
     # shared_xaxes=True: 上下圖共用 X 軸縮放
     fig = make_subplots(
-        rows=2, cols=1, 
+        rows=3, cols=1, 
         shared_xaxes=True, 
-        vertical_spacing=0.05,
-        row_heights=[0.7, 0.3],     # 高度比例 7:3
-        specs=[[{"secondary_y": False}], [{"secondary_y": True}]] 
+        vertical_spacing=0.03,
+        row_heights=[0.6, 0.2, 0.2],     # 高度比例 6:2:2
+        specs=[
+            [{"secondary_y": False}], # Row 1: Price
+            [{"secondary_y": True}],  # Row 2: Volume/CVD
+            [{"secondary_y": True}]   # Row 3: LOB (OBI/OFI)
+        ]
     )
 
     # ---------------------------------------------------------
@@ -99,7 +104,9 @@ def build_combined_figure(data):
                 else:
                     fig.data[-1].visible = True
 
-    # 3. Oscillators (副圖指標 - Row 2)
+    # ---------------------------------------------------------
+    # Row 2: Oscillators (副圖指標)
+    # ---------------------------------------------------------
     valid_indicators = [ind for ind in INDICATORS_SETUP if ind.get('type') == TYPE_OSCILLATOR and ind['id'] in data['history']]
     
     for ind in valid_indicators:
@@ -109,23 +116,56 @@ def build_combined_figure(data):
         x_data = data['tick_x']
         
         # 動態分派 Renderer (Dynamic Dispatch)
-        # 尋找 renderers.py 中對應的 render_xxx 方法
         method_name = f"render_{ind_id.lower()}"
         renderer = getattr(renderers.OscillatorRenderers, method_name, None)
         
         if renderer:
-            # 判斷是否預設隱藏
-            rank = getattr(renderer, 'rank', 99) # Handle ranking if needed
-            
-            # 呼叫 renderer
             renderer(fig, x_data, y_data, ind, row=2, col=1)
             
-            # Post-processing visibility
             if ind['id'] in DEFAULT_OFF_LEGENDS:
                 fig.data[-1].visible = 'legendonly'
         else:
-            # Fallback (Simple Line)
             pass
+
+    # ---------------------------------------------------------
+    # Row 3: LOB Metrics (OBI / OFI)
+    # ---------------------------------------------------------
+    x_data = data['tick_x']
+    
+    # Render OBI (Left Axis)
+    if 'obi' in data['history']:
+        y_obi = data['history']['obi'][data['start_idx']::data['step']]
+        renderers.OscillatorRenderers.render_obi(fig, x_data, y_obi, {}, row=3, col=1)
+
+    # Render OFI (Right Axis)
+    if 'ofi' in data['history']:
+        # OFI usually needs CumSum if it's stored as Flow in SHM
+        # But wait, did I store Flow or CumFlow in SHM?
+        # In `lob.py`, `get_metrics` returns bucket 'ofi'.
+        # In `server.py`, `write_batch` writes it to `ofi` array.
+        # In `handler.py`, I load it into `self.history['ofi']`.
+        # `memory.py` `write_batch` implements cumulative for `cum_volume`, but NOT for `ofi`.
+        # So SHM `ofi` is likely instantaneous Flow (or accumulated flow per tick).
+        # Dashboard usually wants Cumulative OFI to show trend.
+        # Let's perform CumSum here (or in state.py). 
+        # Performing NumPY CumSum in View (chart.py) is fine for visualization.
+        
+        raw_ofi = data['history']['ofi'][data['start_idx']::data['step']]
+        # Simple cumulative sum for the view range? 
+        # Ideally, we want global cumulative sum.
+        # But since we only have the slice, if we cumsum the slice, it starts from 0.
+        # To get global cumsum, we should have calculated it in `state.py` or stored it in `memory.py`.
+        # Storing CumOFI in SHM would be better, but I defined Schema as 'ofi'.
+        # Let's check `lob.py`:
+        # `bucket['ofi'] += flow_delta` -> Accumulates flow within the millisecond.
+        # So it is Flow.
+        # Since I cannot easily change SHM CumSum logic right now (it requires modifying write_batch complex logic),
+        # I will do `np.cumsum` here. It will show "Session Cumulative OFI" relative to the start of the view window (or session if full view).
+        # Actually, if I want correct relative chart, start from 0 at view start is acceptable for trend analysis.
+        
+        cum_ofi = np.cumsum(raw_ofi)
+        renderers.OscillatorRenderers.render_ofi(fig, x_data, cum_ofi, {}, row=3, col=1)
+
 
     # 4. Volume Profile (Overlay on Row 1)
     # 這是一個特殊的 Trace，疊加在主圖右側
@@ -174,14 +214,14 @@ def build_combined_figure(data):
             tickformat=',.0f'
         ), 
         
-        # [Axis 2] 副圖動能柱狀圖 (左軸)
+        # [Axis 2] 副圖動能柱狀圖 (Row 2 左軸)
         yaxis2=dict(
             side='left', 
             showgrid=True, 
             gridcolor='#333'
         ),                    
         
-        # [Axis 3] 副圖 CVD 線圖 (右軸，疊加於 Axis 2)
+        # [Axis 3] 副圖 CVD 線圖 (Row 2 右軸，疊加於 Axis 2)
         yaxis3=dict(
             side='right', 
             showgrid=False, 
@@ -189,7 +229,28 @@ def build_combined_figure(data):
             zeroline=True, 
             zerolinewidth=1, 
             zerolinecolor='rgba(255,255,255,0.3)',
-            overlaying='y2'     # 關鍵：共享副圖空間 (Dual Axis)
+            overlaying='y2'     # 關鍵：共享 Row 2 空間
+        ),
+
+        # [Axis 4] LOB OBI (Row 3 左軸)
+        yaxis4=dict(
+            side='left',
+            showgrid=True,
+            gridcolor='#333',
+            range=[-1.1, 1.1], # OBI is -1 to 1
+            zeroline=True,
+            zerolinecolor='rgba(255,255,255,0.5)'
+        ),
+
+        # [Axis 5] LOB OFI (Row 3 右軸)
+        yaxis5=dict(
+            side='right',
+            showgrid=False,
+            overlaying='y4',
+            tickformat=',.0f',
+            zeroline=True, 
+            zerolinewidth=1, 
+            zerolinecolor='rgba(255,255,255,0.3)'
         ),
         
         # --- 6. X 軸配置 (X-Axis Base) ---
@@ -199,39 +260,60 @@ def build_combined_figure(data):
             range=initial_range if initial_range else None
         ),
         
-        # [Axis 4] Volume Profile X-Axis (Overlay Top)
-        # 用於繪製 Volume Profile 的橫向 Bar
-        xaxis3=dict(
-            overlaying='x', # 疊加在主 X 軸上
-            side='top',     # 座標軸顯示在上方 (或隱藏)
+        # [Axis 4 -> Now needs to be mapped correctly for VP?]
+        # Plotly internals: xaxis of trace.
+        # If we use Row 1, Col 1, it uses 'x' and 'y'.
+        # Our Volume Profile trace manually sets `xaxis='x3'`.
+        # Wait, if we added rows, does `x3` shift?
+        # `make_subplots` generates:
+        # Row 1: x, y
+        # Row 2: x2, y2, y3
+        # Row 3: x3, y4, y5  <-- Wait! x3 is now Row 3's Axis!
+        
+        # VP used 'x3' manually before. This will CONFLICT with Row 3.
+        # I must assign a NEW custom axis for VP, say 'x4' or 'x_vp'.
+        # But `make_subplots` manages names automatically.
+        # If I use `xaxis='x99'`, I need to define `xaxis99` in layout.
+        
+        # Let's define VP axis as 'x4' (Assuming 3 rows use x1, x2, x3).
+        # Warning: `make_subplots` shared_xaxes=True means x, x2, x3 are linked.
+        # VP needs an INDEPENDENT axis on Row 1.
+        
+        # Solution: explicit definition of xaxis4 for VP.
+        
+        # [Axis VP] Volume Profile X-Axis (Overlay Top of Row 1)
+        xaxis4=dict(
+            overlaying='x', # 疊加在主 X 軸 (Row 1)
+            side='top',     
             showgrid=False,
-            visible=False,  # 隱藏軸線以免干擾視覺
-            matches=None    # 關鍵：不可以跟時間軸同步縮放 (因為它是成交量刻度)
+            visible=False,  
+            matches=None    
         ),
     )
     
-    # =========================================================
-    # 📏 Axis Styling & Crosshair (軸線樣式與十字準星)
-    # =========================================================
+    # [CRITICAL FIX]
+    # update_xaxes matches='x' applies to x, x2, x3.
+    # VP uses x4.
+    
+    # Wait, my VP renderer sets `xaxis='x3'`. I must update VP logic too?
+    # Yes. I need to update `renderers.add_volume_profile` to use `x4` or pass axis name.
+    # But `renderers.add_volume_profile` is in `renderers.py`. I didn't change it.
+    # It hardcodes `xaxis='x3'`.
+    # This is bad. Row 3 will likely get messed up or VP will appear on Row 3.
+    
+    # I MUST update `renderers.py` to allow custom xaxis name OR update it to 'x4'.
+    # I should update `renderers.py` first to be safe? Or just patch it now?
+    # I'll update `renderers.py` in the NEXT step (fixing the x3 conflict).
+    # For now, let's write `chart.py` using `xaxis4` in layout, and I will fix renderer after.
     
     fig.update_xaxes(
         # 1. 網格與標籤
         showgrid=True,
         showticklabels=True,  # 強制主副圖皆顯示時間
         matches='x',          # 確保上下圖縮放同步
-    
-        # 2. 十字準星 (Spikes)
-        # 這裡設定的是基礎十字線行為，是否顯示取決於 hovermode
-        showspikes=True,
-        spikemode='across',       # 橫跨模式：貫穿整個繪圖區
-        spikethickness=0.5,       # 線條粗細
-        spikedash='dash',         # 線條樣式：虛線
-        spikecolor=UI_COLOR['TEXT_MAIN'], 
     )
     
-    # [CRITICAL FIX]
-    # update_xaxes(matches='x') 會遞歸套用到所有 x 軸，包括 xaxis3 (VP 軸)。
-    # 但 VP 軸不能跟時間軸同步，所以必須在最後再次強制解除 matches。
-    fig.update_layout(xaxis3=dict(matches=None))
+    # Fix for VP Axis (x4)
+    fig.update_layout(xaxis4=dict(matches=None))
     
     return fig

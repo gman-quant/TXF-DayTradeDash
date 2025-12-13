@@ -140,6 +140,8 @@ python -m bin.start_engine
 | `--end-date` | `YYYY-MM-DD` | 指定回放結束日期 (選填，若無則只回放單日)。 |
 | **`--mode`** | `live` (**Default**) | **實時監控**。正常盤中運作模式 (Kafka Live)。 |
 | | `history` | **歷史回測**。用於 Legacy Kafka 回放 (需明確指定)。 |
+| **`--session`** | `day` (**Default**) | **指定盤別**。用於 Kafka History Mode。 |
+| | `night` | 指定夜盤時段 (前日 15:00 ~ 當日 05:00)。 |
 
 -----
 

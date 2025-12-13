@@ -49,14 +49,25 @@ class GaleKafkaConsumer:
             
         offsets_found = self.consumer.offsets_for_times(partitions, timeout=10.0)
         
+        # [Fix] Batch Assignment
+        to_assign = []
+        for tp in offsets_found:
+            to_assign.append(tp)
+        
+        # Assign ALL partitions once
+        if to_assign:
+            self.consumer.assign(to_assign)
+            
+        # Then seek
         for tp in offsets_found:
             if tp.offset != -1:
-                self.consumer.assign([tp])
                 self.consumer.seek(tp)
                 self.logger.info(f"Topic {tp.topic} seek to offset {tp.offset}")
             else:
                 self.logger.warning(f"Topic {tp.topic} offset not found for time {start_dt}")
-                self.consumer.assign([tp])
+                # Kafka 預設 behavior for assigned but not seeked? 
+                # Usually it resumes from last committed or auto.offset.reset
+                # We already assigned it, so it's fine.
 
     def close(self):
         if self.consumer:
@@ -105,7 +116,7 @@ class GaleKafkaConsumer:
                             continue
                     
                     # 收集有效訊息
-                    valid_batch.append(msg.value())
+                    valid_batch.append(msg)
                 
                 if valid_batch:
                     yield valid_batch

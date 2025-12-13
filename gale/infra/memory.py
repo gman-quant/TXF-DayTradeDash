@@ -48,6 +48,10 @@ class SharedRingBuffer:
             ('cum_close',        np.float64, 8),
             ('cum_buy_vol',      np.int64,   8),
             ('cum_sell_vol',     np.int64,   8),
+            # [LOB Integration]
+            ('obi',              np.float64, 8),
+            ('ofi',              np.float64, 8),
+            ('lob_lag',          np.float64, 8),
         ]
         
         # 計算總大小
@@ -198,10 +202,12 @@ class SharedRingBuffer:
             
         self.head = new_head # Update head in Shared Memory (signal for readers)
 
-    def write_batch(self, ticks: list):
+    def write_batch(self, ticks: list, lob_data: list = None):
         """
         批次寫入大量 Ticks (Vectorized Write)
-        效能遠高於迴圈呼叫 write_tick。
+        Args:
+            ticks: List of Tick objects
+            lob_data: Optional list of (obi, ofi, lob_lag) tuples, matching ticks length.
         """
         n = len(ticks)
         if n == 0: return
@@ -219,6 +225,20 @@ class SharedRingBuffer:
         # [Fix] Add missing fields
         total_vol_arr = np.array([t.total_volume for t in ticks], dtype=np.int64)
         underlying_arr = np.array([t.underlying_price / 10000.0 for t in ticks], dtype=np.float64)
+        
+        # [LOB Integration] Extract OBI/OFI/Lag
+        if lob_data and len(lob_data) == n:
+            # zip(*lob_data) unzip list of tuples -> (tuple of obis, tuple of ofis, ...)
+            # This is efficient.
+            lob_tuple = list(zip(*lob_data))
+            obi_arr = np.array(lob_tuple[0], dtype=np.float64)
+            ofi_arr = np.array(lob_tuple[1], dtype=np.float64)
+            lag_arr = np.array(lob_tuple[2], dtype=np.float64)
+        else:
+            # Default zeros
+            obi_arr = np.zeros(n, dtype=np.float64)
+            ofi_arr = np.zeros(n, dtype=np.float64)
+            lag_arr = np.zeros(n, dtype=np.float64)
         
         # 2. 計算累積數據 (Vectorized Cumulative)
         # 需要取得當前 Buffer 裡 "上一筆" 的累積值
@@ -289,6 +309,11 @@ class SharedRingBuffer:
             self.total_volume[current_head:end] = total_vol_arr
             self.underlying_price[current_head:end] = underlying_arr
             
+            # [LOB Integration] Write new fields
+            self.obi[current_head:end] = obi_arr
+            self.ofi[current_head:end] = ofi_arr
+            self.lob_lag[current_head:end] = lag_arr
+            
             # Cumulative Arrays
             self.cum_volume[current_head:end] = batch_cum_vol
             self.cum_pv[current_head:end] = batch_cum_pv
@@ -323,6 +348,11 @@ class SharedRingBuffer:
             self.total_volume[current_head:] = total_vol_arr[:first_len]
             self.underlying_price[current_head:] = underlying_arr[:first_len]
             
+            # [LOB Integration]
+            self.obi[current_head:] = obi_arr[:first_len]
+            self.ofi[current_head:] = ofi_arr[:first_len]
+            self.lob_lag[current_head:] = lag_arr[:first_len]
+            
             self.cum_volume[current_head:] = batch_cum_vol[:first_len]
             self.cum_pv[current_head:] = batch_cum_pv[:first_len]
             self.cum_close[current_head:] = batch_cum_close[:first_len]
@@ -343,6 +373,11 @@ class SharedRingBuffer:
             # [Fix] Write missing fields (Chunk 2)
             self.total_volume[:remain_len] = total_vol_arr[first_len:]
             self.underlying_price[:remain_len] = underlying_arr[first_len:]
+
+            # [LOB Integration]
+            self.obi[:remain_len] = obi_arr[first_len:]
+            self.ofi[:remain_len] = ofi_arr[first_len:]
+            self.lob_lag[:remain_len] = lag_arr[first_len:]
 
             self.cum_volume[:remain_len] = batch_cum_vol[first_len:]
             self.cum_pv[:remain_len] = batch_cum_pv[first_len:]
@@ -376,7 +411,10 @@ class SharedRingBuffer:
             self.total_volume,      # 10
             self.cum_buy_vol,       # 11
             self.cum_sell_vol,      # 12
-            self.head               # 13 (注意：這裡是回傳 int value 還是 view? TxfRingBuffer 回傳 int value)
+            self.obi,               # 13 [New]
+            self.ofi,               # 14 [New]
+            self.lob_lag,           # 15 [New]
+            self.head               # 16
         )
 
     def shutdown(self):

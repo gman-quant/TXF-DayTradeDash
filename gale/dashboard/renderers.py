@@ -123,7 +123,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             x=total_vols,
             customdata=buy_vols, # 傳入真實 Buy Vol 供 tooltip 顯示正確數值
             orientation='h',
-            xaxis='x3',     # 使用專用的 VP X軸
+            xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
             yaxis='y',
             name='Buy Vol',
             width=bin_size * 0.95,
@@ -139,7 +139,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             y=prices,
             x=sell_vols,
             orientation='h',
-            xaxis='x3',
+            xaxis='x4',     # [Fix] Use X4
             yaxis='y',
             name='Sell Vol',
             width=bin_size * 0.95,
@@ -156,7 +156,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             y=prices, 
             x=volumes,
             orientation='h',
-            xaxis='x3', 
+            xaxis='x4',     # [Fix] Use X4
             yaxis='y', 
             name='Volume Profile',
             width=bin_size * 0.95,
@@ -223,3 +223,71 @@ class OscillatorRenderers:
             x=x_data, y=y_data, name=f"{config['id']} (>= 15)",
             marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3
         ), row=row, col=col, secondary_y=False)
+
+    @staticmethod
+    def render_obi(fig, x_data, y_data, config, row, col):
+        """
+        繪製 OBI (Order Book Imbalance)
+        Style: Filled Area (Cyan for positive, Red for negative)
+        """
+        # Split positive and negative for coloring
+        y_pos = np.maximum(0, y_data)
+        y_neg = np.minimum(0, y_data)
+        
+        # Positive Area (Cyan)
+        fig.add_trace(go.Scattergl(
+            x=x_data, y=y_pos, 
+            mode='lines', 
+            name='OBI (+)',
+            line=dict(width=0, color='cyan'),
+            fill='tozeroy',
+            fillcolor='rgba(0, 255, 255, 0.3)',
+            legendgroup='OBI', showlegend=True
+        ), row=row, col=col, secondary_y=False)
+
+        # Negative Area (Red)
+        fig.add_trace(go.Scattergl(
+            x=x_data, y=y_neg, 
+            mode='lines', 
+            name='OBI (-)',
+            line=dict(width=0, color='red'),
+            fill='tozeroy',
+            fillcolor='rgba(255, 0, 0, 0.3)',
+            legendgroup='OBI', showlegend=False
+        ), row=row, col=col, secondary_y=False)
+        
+
+
+    @staticmethod
+    def render_ofi(fig, x_data, y_data, config, row, col):
+        """
+        繪製 OFI (Order Flow Imbalance) -> Accumulator
+        Style: Gold Line with Fill (Matching CVD style)
+        """
+        group_name = "OFI"
+        
+        # Main Line
+        fig.add_trace(go.Scattergl(
+            x=x_data, y=y_data,
+            mode='lines',
+            name='CumOFI',
+            line=dict(color='gold', width=1.0),
+            legendgroup=group_name, showlegend=True
+        ), row=row, col=col, secondary_y=True) 
+
+        # Fill Area (Zero Line)
+        # Using same trick as CVD for consistent look
+        y_pos = np.maximum(0, y_data)
+        y_neg = np.minimum(0, y_data)
+        common_fill = dict(
+            mode='lines', 
+            line=dict(width=0), 
+            fill='tozeroy', 
+            fillcolor='rgba(255, 215, 0, 0.1)', # Gold tint
+            hoverinfo='skip', 
+            legendgroup=group_name, 
+            showlegend=False
+        )
+        
+        fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
+        fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)

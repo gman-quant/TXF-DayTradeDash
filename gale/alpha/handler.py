@@ -57,6 +57,11 @@ class IndicatorManager:
         self.history['velocity'] = np.zeros(buffer_capacity, dtype=np.float64)
         self.history['imbalance'] = np.zeros(buffer_capacity, dtype=np.float64)
         
+        # [LOB Integration] Initialize History Arrays
+        self.history['obi'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['ofi'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['lob_lag'] = np.zeros(buffer_capacity, dtype=np.float64)
+        
         # 🆕 有效量 (Effective Volume)
         # 用於存儲「重組後」的成交量。
         # 拆單 (Split Orders) 會被合併到第一筆，其餘設為 0。
@@ -265,6 +270,13 @@ class IndicatorManager:
         self.history["timestamp"][curr_idx] = time_val
         self.history["close"][curr_idx]     = close_val
         self.history["volume"][curr_idx]    = vol_val
+        
+        # [LOB Integration] Copy from Snapshot
+        # Indices based on memory.py get_snapshot: 
+        # 13=obi, 14=ofi, 15=lob_lag
+        self.history["obi"][curr_idx]     = float(snapshot_tuple[13][curr_idx])
+        self.history["ofi"][curr_idx]     = float(snapshot_tuple[14][curr_idx])
+        self.history["lob_lag"][curr_idx] = float(snapshot_tuple[15][curr_idx])
         
         # ==========================================
         # 5. 大單重組 (Whale Reconstruction) - Effective Volume Logic
