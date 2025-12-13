@@ -220,9 +220,12 @@ class CoreSupervisor:
             time.sleep(1)
 
             # 3. Start Strategy (in-process, blocks here)
-            self.start_strategy()
+            # [User Request] Temporarily disable strategy to run Feed/Dashboard only
+            # self.start_strategy()
+            logger.info("⚠️ Strategy Engine is disabled by user request.")
             
-            # [Fix] In History Mode, keep dashboard alive until user exits
+            # Since strategy is disabled, we must simulate the 'Wait' behavior for History Mode
+            # Otherwise the script hits 'finally' and kills everything immediately.
             if self.args.mode == 'history':
                 logger.info("🎬 Replay Finished. Dashboard is still active.")
                 logger.info("👉 Press Ctrl+C to stop and close Dashboard.")
