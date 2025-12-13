@@ -419,13 +419,17 @@ class SharedRingBuffer:
 
     def shutdown(self):
         """關閉 SharedMemory 連線 (Idempotent: 可重複呼叫)"""
-        # 1. 防止 Resource Tracker 誤報 (Reader/Writer 都要做)
-        try:
-            from multiprocessing import resource_tracker
-            # Unregister first to silence tracker
-            resource_tracker.unregister(self.shm._name, "shared_memory")
-        except Exception:
-            pass # 可能已經被 unregister 過，或 name 不存在
+        # 1. 如果是 Reader (Create=False)，需要手動 Unregister
+        if not self.is_owner:
+            try:
+                from multiprocessing import resource_tracker
+                name = self.shm._name
+                try:
+                    resource_tracker.unregister(name, "shared_memory")
+                except KeyError:
+                    pass 
+            except Exception:
+                pass
 
         # 2. 關閉 FD
         try:
@@ -433,7 +437,7 @@ class SharedRingBuffer:
         except Exception:
             pass
         
-        # 3. 如果是擁有者 (Writer)，負責銷毀實體檔案
+        # 3. 如果是 Owner (Writer)，呼叫 unlink (它內部會自動 unregister，不要手動呼叫避免 KeyError)
         if self.is_owner:
             try:
                 self.shm.unlink()
@@ -441,4 +445,5 @@ class SharedRingBuffer:
             except (FileNotFoundError, IndexError, ValueError):
                 pass
             except Exception as e:
+                # 只有非 KeyError 的才報錯 (KeyError 表示已經被清過了)
                 self.logger.warning(f"Unlink warning: {e}")

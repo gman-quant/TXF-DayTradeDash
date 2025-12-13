@@ -227,34 +227,36 @@ class OscillatorRenderers:
     @staticmethod
     def render_obi(fig, x_data, y_data, config, row, col):
         """
-        繪製 OBI (Order Book Imbalance)
-        Style: Filled Area (Cyan for positive, Red for negative)
+        繪製 CumOBI (Cumulative Order Book Imbalance)
+        Style: Cyan Line with Fill
         """
-        # Split positive and negative for coloring
+        group_name = "OBI"
+        
+        # Main Line
+        fig.add_trace(go.Scattergl(
+            x=x_data, y=y_data, 
+            mode='lines', 
+            name='CumOBI',
+            line=dict(width=1.0, color='cyan'),
+            legendgroup=group_name, showlegend=True
+        ), row=row, col=col, secondary_y=False)
+
+        # Fill Area
         y_pos = np.maximum(0, y_data)
         y_neg = np.minimum(0, y_data)
         
-        # Positive Area (Cyan)
-        fig.add_trace(go.Scattergl(
-            x=x_data, y=y_pos, 
+        common_fill = dict(
             mode='lines', 
-            name='OBI (+)',
-            line=dict(width=0, color='cyan'),
-            fill='tozeroy',
-            fillcolor='rgba(0, 255, 255, 0.3)',
-            legendgroup='OBI', showlegend=True
-        ), row=row, col=col, secondary_y=False)
-
-        # Negative Area (Red)
-        fig.add_trace(go.Scattergl(
-            x=x_data, y=y_neg, 
-            mode='lines', 
-            name='OBI (-)',
-            line=dict(width=0, color='red'),
-            fill='tozeroy',
-            fillcolor='rgba(255, 0, 0, 0.3)',
-            legendgroup='OBI', showlegend=False
-        ), row=row, col=col, secondary_y=False)
+            line=dict(width=0), 
+            fill='tozeroy', 
+            fillcolor='rgba(0, 255, 255, 0.1)', # Cyan tint
+            hoverinfo='skip', 
+            legendgroup=group_name, 
+            showlegend=False
+        )
+        
+        fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=False)
+        fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=False)
         
 
 

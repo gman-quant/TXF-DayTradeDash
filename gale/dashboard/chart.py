@@ -58,7 +58,7 @@ def build_combined_figure(data):
         rows=3, cols=1, 
         shared_xaxes=True, 
         vertical_spacing=0.03,
-        row_heights=[0.6, 0.2, 0.2],     # 高度比例 6:2:2
+        row_heights=[0.5, 0.25, 0.25],     # 高度比例 5:2.5:2.5
         specs=[
             [{"secondary_y": False}], # Row 1: Price
             [{"secondary_y": True}],  # Row 2: Volume/CVD
@@ -134,8 +134,10 @@ def build_combined_figure(data):
     
     # Render OBI (Left Axis)
     if 'obi' in data['history']:
-        y_obi = data['history']['obi'][data['start_idx']::data['step']]
-        renderers.OscillatorRenderers.render_obi(fig, x_data, y_obi, {}, row=3, col=1)
+        raw_obi = data['history']['obi'][data['start_idx']::data['step']]
+        # [Experiment] Cumulative OBI
+        cum_obi = np.cumsum(raw_obi)
+        renderers.OscillatorRenderers.render_obi(fig, x_data, cum_obi, {}, row=3, col=1)
 
     # Render OFI (Right Axis)
     if 'ofi' in data['history']:
@@ -237,9 +239,10 @@ def build_combined_figure(data):
             side='left',
             showgrid=True,
             gridcolor='#333',
-            range=[-1.1, 1.1], # OBI is -1 to 1
+            # range=[-1.1, 1.1], # [Fix] Removed fixed range for CumOBI
             zeroline=True,
-            zerolinecolor='rgba(255,255,255,0.5)'
+            zerolinewidth=1, 
+            zerolinecolor='rgba(255,255,255,0.3)'
         ),
 
         # [Axis 5] LOB OFI (Row 3 右軸)

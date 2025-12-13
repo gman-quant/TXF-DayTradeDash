@@ -109,6 +109,8 @@ class IngestServer:
         pending_ticks = []  # Buffer for ticks waiting for quotes
         MAX_TICK_WAIT_MS = 50 # Max wait time for a tick before forcing write (Lag Safety)
         
+        ingestion_complete = False
+
         try:
             async for batch_msgs in self.consumer.consume_stream(running_check=lambda: self.running):
                 if not self.running: break
@@ -142,7 +144,7 @@ class IngestServer:
                             
                             if end_ts_ms and t.timestamp_ms > end_ts_ms:
                                 logger.info(f"🛑 Reached session end time via Tick: {end_offset}.")
-                                self.running = False
+                                # self.running = False # [Keep Alive]
                                 break
                             
                             # Add to pending buffer
@@ -150,6 +152,9 @@ class IngestServer:
                             
                     except Exception as e:
                         logger.error(f"Processing Error: {e}")
+                
+                # [Revert] Removed outer loop break to allow future quotes to flush pending ticks
+                # (This will cause log spam but ensures data completeness)
 
                 # --- 2. Flushing Logic (Micro-Sync) ---
                 # Check pending ticks against LOB Watermark

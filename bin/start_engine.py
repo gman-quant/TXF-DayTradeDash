@@ -206,10 +206,14 @@ class CoreSupervisor:
             
             # [Health Check] Wait and see if Feed crashes immediately
             time.sleep(2)
-            if self.ingest_process.poll() is not None:
-                logger.error(f"❌ Feed Process Crashed! Return Code: {self.ingest_process.returncode}")
-                # We can't easily read stderr here without pipe, but user should see it in terminal.
-                sys.exit(1)
+            ret = self.ingest_process.poll()
+            if ret is not None:
+                if ret == 0:
+                    logger.info("✅ Feed Process finished successfully.")
+                    sys.exit(0)
+                else:
+                    logger.error(f"❌ Feed Process Crashed! Return Code: {ret}")
+                    sys.exit(1)
             
             # 2. Start Dashboard Subprocess (New!)
             self.start_dashboard()
@@ -217,6 +221,13 @@ class CoreSupervisor:
 
             # 3. Start Strategy (in-process, blocks here)
             self.start_strategy()
+            
+            # [Fix] In History Mode, keep dashboard alive until user exits
+            if self.args.mode == 'history':
+                logger.info("🎬 Replay Finished. Dashboard is still active.")
+                logger.info("👉 Press Ctrl+C to stop and close Dashboard.")
+                while True:
+                    time.sleep(1)
             
         except KeyboardInterrupt:
             logger.info("Supervisor received Ctrl+C.")
