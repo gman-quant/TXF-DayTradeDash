@@ -20,7 +20,7 @@ except ImportError:
     logger.error("❌ Polars not installed. Please run: pip install polars")
     sys.exit(1)
 
-def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=200000):
+def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=200000, prev_close=0.0):
     """
     Parquet 回放器主邏輯 (Multi-Day Support)
     Args:
@@ -176,11 +176,15 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
         except Exception as e:
             logger.warning(f"⚠️ Failed to unlink existing SHM: {e}")
 
-        # [Multi-Day] Use dynamic capacity
+        # [多日模式] 使用動態容量
         logger.info(f"💾 Initializing Shared Ring Buffer (Capacity: {capacity})...")
         ring_buffer = SharedRingBuffer(name=shm_name, capacity=capacity, create=True)
-        # Try to find prev_close from polars df if exists
-        # if 'prev_close' in df.columns: ...
+        
+        # [新增] 寫入昨收參考價 (Reference Price)
+        if prev_close > 0:
+            ring_buffer.prev_close = prev_close
+            logger.info(f"✅ Set Prev Close Price: {prev_close}")
+            
         logger.info(f"✅ Shared Buffer Created: {shm_name}")
     except Exception as e:
         logger.error(f"Failed to init Shared Buffer: {e}")
@@ -389,7 +393,8 @@ if __name__ == "__main__":
     parser.add_argument('--underlying', nargs='*', help="Path to Underlying (TSE) parquet file(s)", default=None)
     # [Multi-Day] Capacity
     parser.add_argument('--capacity', type=int, default=200000, help="Ring Buffer Capacity")
+    parser.add_argument('--prev-close', type=float, default=0.0, help="Previous Close Price")
     
     args = parser.parse_args()
     
-    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity)
+    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close)

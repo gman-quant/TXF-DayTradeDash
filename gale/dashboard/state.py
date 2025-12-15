@@ -112,6 +112,15 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         if key not in view_history:
             view_history[key] = indicator_manager.get_linear_snapshot(key)
 
+    # [Refactor] 集中累積邏輯 (Data Prep Layer)
+    # 將 OBI/OFI 的原始流量 (Flow) 轉換為累積狀態 (Cumulative State)。
+    # 確保 View 層 (chart.py) 拿到的已是可用數據，落實關注點分離。
+    if 'obi' in view_history:
+        view_history['obi'] = np.cumsum(view_history['obi'])
+        
+    if 'ofi' in view_history:
+        view_history['ofi'] = np.cumsum(view_history['ofi'])
+
     # [NEW] VWAP Bands Calculation (On-the-fly)
     if 'close' in view_history and 'volume' in view_history:
         import gale.alpha.engine as ne

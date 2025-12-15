@@ -62,43 +62,43 @@ INDICATORS_SETUP = [
         'style': 'solid'
     },
     # --- 技術指標 ---
-    {
-        'id': 'Max_250',
-        'func': 'calc_rolling_max',
-        'args': [250],                  # 過去 60 筆
-        'type': TYPE_OVERLAY,          # 疊加在主圖
-        'inputs': ['close'],           # 只需要收盤價
-        'color': '#00FF00',            # 綠色 (壓力線)
-        'style': 'dash'
-    },
-    {
-        'id': 'Min_250',
-        'func': 'calc_rolling_min',
-        'args': [250],                  # 過去 60 筆
-        'type': TYPE_OVERLAY,
-        'inputs': ['close'],
-        'color': '#FF0000',            # 紅色 (支撐線)
-        'style': 'dash'
-    },
+    # {
+    #     'id': 'Max_250',
+    #     'func': 'calc_rolling_max',
+    #     'args': [250],                  # 過去 60 筆
+    #     'type': TYPE_OVERLAY,          # 疊加在主圖
+    #     'inputs': ['close'],           # 只需要收盤價
+    #     'color': '#00FF00',            # 綠色 (壓力線)
+    #     'style': 'dash'
+    # },
+    # {
+    #     'id': 'Min_250',
+    #     'func': 'calc_rolling_min',
+    #     'args': [250],                  # 過去 60 筆
+    #     'type': TYPE_OVERLAY,
+    #     'inputs': ['close'],
+    #     'color': '#FF0000',            # 紅色 (支撐線)
+    #     'style': 'dash'
+    # },
     # --- 移動平均線 (SMA) ---
-    {
-        'id': 'SMA_60',        
-        'func': 'calc_sma',           
-        'args': [60],                 
-        'type': TYPE_OVERLAY,        
-        'inputs': ['cum_close'], 
-        'color': "#FFF000",           
-        'style': 'solid'               
-    },
-    {
-        'id': 'SMA_3min',
-        'func': 'calc_sma_time',
-        'args': [3 * 60000], # 3 分鐘 (毫秒)
-        'type': TYPE_OVERLAY,
-        'inputs': ['cum_close', 'timestamp'],
-        'color': "#E0930F",
-        'style': 'solid'
-    },
+    # {
+    #     'id': 'SMA_60',        
+    #     'func': 'calc_sma',           
+    #     'args': [60],                 
+    #     'type': TYPE_OVERLAY,        
+    #     'inputs': ['cum_close'], 
+    #     'color': "#FFF000",           
+    #     'style': 'solid'               
+    # },
+    # {
+    #     'id': 'SMA_3min',
+    #     'func': 'calc_sma_time',
+    #     'args': [3 * 60000], # 3 分鐘 (毫秒)
+    #     'type': TYPE_OVERLAY,
+    #     'inputs': ['cum_close', 'timestamp'],
+    #     'color': "#E0930F",
+    #     'style': 'solid'
+    # },
     
     # {
     #     'id': 'Max_5m',

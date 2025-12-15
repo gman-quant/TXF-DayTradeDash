@@ -12,8 +12,9 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gale.strategy.engine import StrategyServer
-
 from gale.utils.log_utils import setup_logger
+from config.txf_calendar import NIGHT_SESSION_START
+from gale.infra.db import load_prev_close
 
 # Logging
 logger = setup_logger("Supervisor")
@@ -51,21 +52,19 @@ class CoreSupervisor:
         self.dash_process = None
         
 
-    def _load_prev_close(self):
+    def _load_prev_close(self, target_date_str=None):
         """
-        [Refactored] Use Infrastructure Module to load Prev Close.
+        [重構] 使用基礎架構模組載入昨收價 (Reference Price)。
         """
-        # 如果是 History Mode，不需要昨收 (或者可以設為 0)
-        # 不過 Ingestion Server 還是可以收，沒 harm
-        target_date_str = self.args.date if self.args.mode == 'history' else datetime.now().strftime('%Y-%m-%d')
+        if not target_date_str:
+            target_date_str = self.args.date if self.args.mode == 'history' else datetime.now().strftime('%Y-%m-%d')
         
-        # Call DB Module with logic based on Time/Mode
-        if self.args.mode == 'live' and datetime.now().hour >= 15:
-            op = '<='
+        # 根據 模式 (Mode) 與 時間 (Time) 決定查詢邏輯
+        if self.args.mode == 'live' and datetime.now().time() >= NIGHT_SESSION_START:
+             op = '<='
         else:
-            op = '<'
-            
-        from gale.infra.db import load_prev_close
+             op = '<'
+
         return load_prev_close(target_date_str, op=op)
 
     def start_ingestion(self):
@@ -147,6 +146,28 @@ class CoreSupervisor:
                 cmd.append("--underlying")
                 cmd.extend(tse_files) 
                 
+            # [新增] 針對回測起始日計算昨收價
+            start_date_for_prev = None
+            if self.args.date:
+                start_date_for_prev = self.args.date
+            elif self.args.file:
+                # 嘗試從檔名 "YYYY-MM-DD_..." 解析日期
+                try:
+                    filename = os.path.basename(self.args.file)
+                    start_date_for_prev = filename.split('_')[0]
+                    # 驗證格式
+                    datetime.strptime(start_date_for_prev, "%Y-%m-%d")
+                except:
+                    start_date_for_prev = None
+
+            if start_date_for_prev:
+                try:
+                    replay_prev_close = self._load_prev_close(target_date_str=start_date_for_prev)
+                    cmd.extend(["--prev-close", str(replay_prev_close)])
+                    logger.info(f"✅ Replay Prev Close for {start_date_for_prev}: {replay_prev_close}")
+                except Exception as e:
+                     logger.warning(f"Failed to load replay prev close: {e}")
+
             cmd.extend(["--capacity", str(calc_capacity)])
             cmd.extend(["--topic", self.args.topic])
             cmd.extend(["--speed", str(self.args.speed)])
@@ -224,13 +245,12 @@ class CoreSupervisor:
             # self.start_strategy()
             logger.info("⚠️ Strategy Engine is disabled by user request.")
             
-            # Since strategy is disabled, we must simulate the 'Wait' behavior for History Mode
+            # Since strategy is disabled, we must simulate the 'Wait' behavior for both History and Live Mode
             # Otherwise the script hits 'finally' and kills everything immediately.
-            if self.args.mode == 'history':
-                logger.info("🎬 Replay Finished. Dashboard is still active.")
-                logger.info("👉 Press Ctrl+C to stop and close Dashboard.")
-                while True:
-                    time.sleep(1)
+            logger.info("🎬 Engine Started. Dashboard is active.")
+            logger.info("👉 Press Ctrl+C to stop and close Dashboard.")
+            while True:
+                time.sleep(1)
             
         except KeyboardInterrupt:
             logger.info("Supervisor received Ctrl+C.")
@@ -295,6 +315,10 @@ def parse_cli_args():
     # [Auto Default Topic]
     if not args.topic:
         args.topic = 'txf-replay' if args.source == 'parquet' else 'txf-tick'
+        
+    # [Fix] Parquet source implies History mode logic (for Prev Close calculation)
+    if args.source == 'parquet':
+        args.mode = 'history'
         
     return args
 

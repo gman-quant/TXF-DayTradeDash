@@ -111,7 +111,9 @@ def build_combined_figure(data):
     
     for ind in valid_indicators:
         ind_id = ind['id']
-        # 降頻取樣 (與 State.py 的 step 一致)
+        # [Revert] 回歸單純切片法 (Simple Slicing)
+        # 優先考量數據可見性與程式穩定性。
+        # 註：經查核，Lot Size 屬 Rolling Window Metrics (250 ticks)，切片法在統計上是有效的。
         y_data = data['history'][ind_id][data['start_idx']::data['step']]
         x_data = data['tick_x']
         
@@ -124,8 +126,6 @@ def build_combined_figure(data):
             
             if ind['id'] in DEFAULT_OFF_LEGENDS:
                 fig.data[-1].visible = 'legendonly'
-        else:
-            pass
 
     # ---------------------------------------------------------
     # Row 3: LOB Metrics (OBI / OFI)
@@ -134,39 +134,16 @@ def build_combined_figure(data):
     
     # Render OBI (Left Axis)
     if 'obi' in data['history']:
-        raw_obi = data['history']['obi'][data['start_idx']::data['step']]
-        # [Experiment] Cumulative OBI
-        cum_obi = np.cumsum(raw_obi)
-        renderers.OscillatorRenderers.render_obi(fig, x_data, cum_obi, {}, row=3, col=1)
+        # [Refactor] 數據已在 state.py 完成預先累加 (State Metric)
+        # 這裡直接切片顯示即可。
+        plot_cum_obi = data['history']['obi'][data['start_idx']::data['step']]
+        renderers.OscillatorRenderers.render_obi(fig, x_data, plot_cum_obi, {}, row=3, col=1)
 
     # Render OFI (Right Axis)
     if 'ofi' in data['history']:
-        # OFI usually needs CumSum if it's stored as Flow in SHM
-        # But wait, did I store Flow or CumFlow in SHM?
-        # In `lob.py`, `get_metrics` returns bucket 'ofi'.
-        # In `server.py`, `write_batch` writes it to `ofi` array.
-        # In `handler.py`, I load it into `self.history['ofi']`.
-        # `memory.py` `write_batch` implements cumulative for `cum_volume`, but NOT for `ofi`.
-        # So SHM `ofi` is likely instantaneous Flow (or accumulated flow per tick).
-        # Dashboard usually wants Cumulative OFI to show trend.
-        # Let's perform CumSum here (or in state.py). 
-        # Performing NumPY CumSum in View (chart.py) is fine for visualization.
-        
-        raw_ofi = data['history']['ofi'][data['start_idx']::data['step']]
-        # Simple cumulative sum for the view range? 
-        # Ideally, we want global cumulative sum.
-        # But since we only have the slice, if we cumsum the slice, it starts from 0.
-        # To get global cumsum, we should have calculated it in `state.py` or stored it in `memory.py`.
-        # Storing CumOFI in SHM would be better, but I defined Schema as 'ofi'.
-        # Let's check `lob.py`:
-        # `bucket['ofi'] += flow_delta` -> Accumulates flow within the millisecond.
-        # So it is Flow.
-        # Since I cannot easily change SHM CumSum logic right now (it requires modifying write_batch complex logic),
-        # I will do `np.cumsum` here. It will show "Session Cumulative OFI" relative to the start of the view window (or session if full view).
-        # Actually, if I want correct relative chart, start from 0 at view start is acceptable for trend analysis.
-        
-        cum_ofi = np.cumsum(raw_ofi)
-        renderers.OscillatorRenderers.render_ofi(fig, x_data, cum_ofi, {}, row=3, col=1)
+        # [Refactor] 直接切片
+        plot_cum_ofi = data['history']['ofi'][data['start_idx']::data['step']]
+        renderers.OscillatorRenderers.render_ofi(fig, x_data, plot_cum_ofi, {}, row=3, col=1)
 
 
     # 4. Volume Profile (Overlay on Row 1)
@@ -314,9 +291,20 @@ def build_combined_figure(data):
         showgrid=True,
         showticklabels=True,  # 強制主副圖皆顯示時間
         matches='x',          # 確保上下圖縮放同步
+        
+        # 2. 十字游標 (Crosshair / Spike Line)
+        # 用於解決「想要同時看上下圖位置」的需求
+        showspikes=True,
+        spikemode='across',   # 貫穿模式：線條會延伸到所有子圖
+        spikesnap='cursor',   # 默認模式：跟隨游標
+        showline=False,       # 隱藏軸線本身，只留網格
+        spikedash='dash',
+        spikecolor='rgba(255, 255, 255, 0.5)',
+        spikethickness=0.5,
     )
     
     # Fix for VP Axis (x4)
-    fig.update_layout(xaxis4=dict(matches=None))
+    # Ensure it doesn't show spikes (cleaner)
+    fig.update_layout(xaxis4=dict(matches=None, showspikes=False))
     
     return fig
