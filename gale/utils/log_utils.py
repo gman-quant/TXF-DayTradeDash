@@ -14,6 +14,7 @@ def setup_logger(name, level=logging.INFO):
     
     logger = logging.getLogger(name)
     logger.setLevel(level)
+    logger.propagate = False # [Fix] Prevent duplicates if Root has handlers
     
     # 避免重複添加 Handler
     if not logger.handlers:

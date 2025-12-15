@@ -200,8 +200,8 @@ class CoreSupervisor:
         """啟動 Dashboard Process (獨立進程)"""
         # [Dynamic Port Selection]
         # Live/Kafka -> 8050
-        # Parquet Replay -> 8051
-        port = 8051 if self.args.source == 'parquet' else 8050
+        # History (Parquet or Kafka Replay) -> 8051 (to avoid conflict with live)
+        port = 8051 if self.args.mode == 'history' else 8050
         
         # [Capacity] Use self.capacity calculated in start_ingestion
         capacity = getattr(self, 'capacity', 200000)

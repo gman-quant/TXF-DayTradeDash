@@ -106,7 +106,8 @@ class IngestServer:
         forced_flush_count = 0
         
         # [Sync Buffer]
-        pending_ticks = []  # Buffer for ticks waiting for quotes
+        from collections import deque
+        pending_ticks = deque()  # Buffer for ticks waiting for quotes
         MAX_TICK_WAIT_MS = 50 # Max wait time for a tick before forcing write (Lag Safety)
         
         ingestion_complete = False
@@ -156,39 +157,42 @@ class IngestServer:
                 # [Revert] Removed outer loop break to allow future quotes to flush pending ticks
                 # (This will cause log spam but ensures data completeness)
 
-                # --- 2. Flushing Logic (Micro-Sync) ---
+                # --- 2. Flushing Logic (Micro-Sync Optimized) ---
                 # Check pending ticks against LOB Watermark
+                # [Optimization] Use peek/popleft to avoid full list scan (O(N) -> O(k))
                 
                 ready_ticks = []
-                ready_lob_metrics = [] # [Fix] Parallel list for LOB data
-                remaining_ticks = []
+                ready_lob_metrics = [] 
                 
                 # Watermark from LOB Engine
                 max_quote_ts = self.lob_engine.max_seen_ts
                 
                 current_forced = False
                 
-                for t in pending_ticks:
+                # Iterate while there are ticks AND (safe OR forced)
+                while pending_ticks:
+                    t = pending_ticks[0] # Peek
                     tick_ts = t.timestamp_ms
                     
-                    # Condition: Safe to write if we have seen quotes BEYOND this tick
                     is_safe = (max_quote_ts >= tick_ts)
-                    
-                    # Force Condition: If Tick is too old compared to 'current processing'?
-                    # Or simpler: if we have buffered too many ticks (e.g. > 100000), force flush to prevent OOM
                     # [Tuning] High volume bursts require larger buffer
-                    is_forced = (len(pending_ticks) > 100000) 
+                    is_forced = (len(pending_ticks) > 100000)
                     
                     if is_safe or is_forced:
-                        if is_forced: current_forced = True
-                        
-                        # [Sampling]
-                        obi, ofi, lag = self.lob_engine.get_metrics(tick_ts)
-                        
-                        ready_ticks.append(t)
-                        ready_lob_metrics.append((obi, ofi, lag)) # Store tuple
+                         if is_forced: current_forced = True
+                         
+                         # Pop only when ready to process
+                         pending_ticks.popleft()
+                         
+                         # [Sampling]
+                         obi, ofi, lag = self.lob_engine.get_metrics(tick_ts)
+                         
+                         ready_ticks.append(t)
+                         ready_lob_metrics.append((obi, ofi, lag))
                     else:
-                        remaining_ticks.append(t)
+                         # Strict ordering: if Head is unsafe, and Ticks are ordered, Tail is also unsafe.
+                         # Stop checking to save CPU.
+                         break
                 
                 if current_forced:
                     forced_flush_count += 1
@@ -197,9 +201,6 @@ class IngestServer:
                 if ready_ticks:
                     self.ring_buffer.write_batch(ready_ticks, lob_data=ready_lob_metrics)
                     processed_count += len(ready_ticks)
-                    
-                # Update buffer
-                pending_ticks = remaining_ticks
                 
                 # Batch log
                 if processed_count > 0 and (processed_count % 5000 < len(ready_ticks)):
