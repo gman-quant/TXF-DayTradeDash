@@ -73,6 +73,7 @@ class GaleKafkaConsumer:
         if self.consumer:
             self.consumer.close()
             self.logger.info("Kafka Consumer closed.")
+            self.consumer = None # Ensures idempotency
 
 
     async def consume_stream(self, batch_size: int = 500, running_check: Callable[[], bool] = None):

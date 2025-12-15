@@ -112,14 +112,18 @@ class IngestServer:
         
         ingestion_complete = False
 
+        # Pre-calc end timestamp if in history mode
+        end_ts_ms = None
+        if self.args.mode == 'history' and 'end_offset' in locals():
+            end_ts_ms = int(end_offset.timestamp() * 1000)
+            logger.info(f"🛑 Session End Timestamp set to: {end_ts_ms} ({end_offset})")
+
         try:
             async for batch_msgs in self.consumer.consume_stream(running_check=lambda: self.running):
                 if not self.running: break
                 
-                # Pre-calc end timestamp if in history mode
-                end_ts_ms = None
-                if self.args.mode == 'history' and 'end_offset' in locals():
-                    end_ts_ms = int(end_offset.timestamp() * 1000)
+                if ingestion_complete:
+                    break
 
                 # --- 1. Process Messages (Sequencer) ---
                 for msg in batch_msgs:
@@ -135,6 +139,13 @@ class IngestServer:
                             # --- Quote Handling ---
                             q = BidAsk()
                             q.ParseFromString(raw_bytes)
+                            
+                            # [Quote Sanitization] 報價淨化機制
+                            # 目的：阻擋來自未來的異常報價 (例如 09:12 出現 21:30 的 Quote)。
+                            # 效益：確保 LOBEngine.max_seen_ts (內部時鐘) 永遠不被髒資料汙染，維持高可信度。
+                            if end_ts_ms and q.timestamp_ms > end_ts_ms:
+                                continue 
+
                             self.lob_engine.update(q)
                             quote_count += 1
                             
@@ -143,10 +154,37 @@ class IngestServer:
                             t = Tick()
                             t.ParseFromString(raw_bytes)
                             
+                            # [Outlier Protection] 異常停機防護機制
+                            # 概念：採用「觸發 (Trigger) + 准許 (Permission)」雙重驗證。
+                            # 1. 觸發：收到「超時 Tick」(t.timestamp > 收盤時間)，即視為潛在的結束信號。
+                            # 2. 准許：檢查「系統內部時鐘」是否已進入收盤警戒區 (Permission Window)。
                             if end_ts_ms and t.timestamp_ms > end_ts_ms:
-                                logger.info(f"🛑 Reached session end time via Tick: {end_offset}.")
-                                # self.running = False # [Keep Alive]
-                                break
+                                
+                                # [Clock Source] 報價驅動時鐘 (Quote-Driven Clock)
+                                # 策略：使用 max_seen_ts 作為基準。因為 Quotes 遠比 Ticks 密集，即使尾盤 Tick 無量斷流，
+                                #       Quotes 依然會持續推動時間，避免 Deadlock。
+                                current_stream_time = self.lob_engine.max_seen_ts
+                                if current_stream_time == 0:
+                                     current_stream_time = t.timestamp_ms 
+                                
+                                time_remaining = end_ts_ms - current_stream_time
+                                
+                                # [Threshold] 准許門檻：30分鐘 (1,800,000ms)
+                                # 邏輯：
+                                # A. 結算日相容性：結算日 13:30 收盤，距離 13:45 僅 15分鐘，符合 < 30分鐘 (PASS)。
+                                # B. 尾盤無量保護：即使最後 10 分鐘沒 Tick，時鐘 (Quote) 依然會走到 13:35，符合 < 30分鐘 (PASS)。
+                                # C. 早盤誤判防禦：09:xx 的 Outlier 距離收盤 > 4小時，不符合 < 30分鐘 (REJECT)。
+                                if time_remaining < 1800000: 
+                                    logger.info(f"🛑 Reached session end time via Tick: {end_offset}. (StreamTS: {current_stream_time})")
+                                    ingestion_complete = True
+                                    break
+                                else:
+                                    # [Reject] 拒絕異常信號
+                                    # 雖然收到結束信號 (Trigger)，但內部時鐘顯示時間未到 (Permission Denied)。
+                                    if processed_count % 1000 == 0:
+                                         logger.warning(f"⚠️ Ignored Outlier Tick at {t.timestamp_ms} (Stream: {current_stream_time}). (Sampled Log)")
+                                    
+                                    continue # 丟棄此異常 Tick
                             
                             # Add to pending buffer
                             pending_ticks.append(t)
@@ -206,7 +244,7 @@ class IngestServer:
                 if processed_count > 0 and (processed_count % 5000 < len(ready_ticks)):
                      logger.info(f"Processed Ticks: {processed_count}, Quotes: {quote_count}, Pending: {len(pending_ticks)}, Forced Flushes: {forced_flush_count}. LOB Watermark: {max_quote_ts}")
 
-                if not self.running:
+                if not self.running or ingestion_complete:
                     break
                     
             # End of loop
