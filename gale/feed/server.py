@@ -249,6 +249,9 @@ class IngestServer:
                      
                      logger.info(f"Processed Ticks: {processed_count}, Quotes: {quote_count}, Pending: {len(pending_ticks)}. LOB Lag: {avg_lag:.1f}ms. Watermark: {max_quote_ts}")
 
+                # [Optimization] Yield to event loop to reduce CPU usage
+                await asyncio.sleep(0.001)
+
                 if not self.running or ingestion_complete:
                     break
                     

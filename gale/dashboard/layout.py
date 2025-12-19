@@ -149,7 +149,7 @@ def create_main_layout(max_capacity=200000):
             ),
 
             # 5. 狀態暫存區 (Hidden Stores & Interval)
-            dcc.Interval(id='interval-component', interval=1000, n_intervals=0),
+            dcc.Interval(id='interval-component', interval=500, n_intervals=0),
             
             # 紀錄最後更新時間 (用於 Early Peek 優化)
             dcc.Store(id='last-update-timestamp', data=0),

@@ -33,6 +33,9 @@ class GaleKafkaConsumer:
             'group.id': self.group_id,
             'auto.offset.reset': 'latest',  # 預設行為，雖然我們會手動 seek
             'enable.auto.commit': False,    # 追求低延遲通常關閉自動 commit，或自行控制
+            # [HFT Optimization] client-side tuning
+            'fetch.min.bytes': 1,           # 有資料馬上抓 (只要 1 byte 就回傳)
+            'fetch.wait.max.ms': 100,       # 最多等 100ms (平衡點：避免空轉過快，但保有反應力)
         }
         self.consumer = Consumer(conf)
         self.logger.info(f"Connected to Kafka broker: {self.broker_url}")
