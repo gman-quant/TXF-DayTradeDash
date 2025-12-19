@@ -1,14 +1,12 @@
 import math
 import logging
+import heapq  # [Optimization] Priority Queue for O(1) access
 from collections import defaultdict
 from typing import Tuple, Dict
 
 # Config
-# Config
 # 2^16 = 65536ms ~= 65.5 seconds history
 # 這是 HFT 常見的優化技巧: Power of 2 Size 允許使用 Bitwise AND (&) 代替 Mod (%) 運算
-# Config
-# 2^16 = 65536ms ~= 65.5 seconds history
 BUFFER_SIZE = 65536
 BUFFER_MASK = 65535
 
@@ -16,29 +14,33 @@ class LOBEngine:
     """
     機構級 LOB (Level Order Book) 核心運算引擎 (High-Performance Hybrid Sequencer).
     
-    [v2.2 Optimization] Hybrid Set+Buffer Edition (Correctness Focused)
+    [v2.3 Optimization] Min-Heap Edition (Replay Lag Fix)
     
     改良重點：
-    1. **Hybrid OFI Tracking**: 使用 `set` 追蹤有資料的 Time Slots，搭配 `Buffer` 存數值。
-       - 解決了純 Circular Scan 無法處理「遲到數據 (Late Data)」的問題 (即 `ts < last_read_ts` 的 Quote)。
-       - 保證 OFI 累積邏輯與原始 Dict 版本 **100% 等價** (Consumer Model)。
+    1. **Heap-Based Flow Control**: replace `set` with `min_heap`.
+       - Problem: `set` iteration is O(N) where N is *all* buffered future quotes. 
+         During replay/lag, N grows large (e.g. 5000), and we act on M ticks (e.g. 30000). 
+         Total Ops = 150,000,000. System hangs.
+       - Solution: `min_heap` allows O(1) check to see if we have valid data <= tick_ts.
+         Consumption is O(K log N) where K is valid items.
+       - Result: "Death Spiral" eliminated. Replay speed limited only by CPU/IO, not algorithmic complexity.
     
-    2. **Timestamp Tagging for OBI**: 
-       - OBI 繼續使用 Tag 驗證機制，確保同一毫秒內的 Tick 共享狀態，且 Wrap Around 時自動重置。
-
+    2. **Hybrid OFI Tracking**: 
+       - `heap` 儲存 (ts, idx) Tuple。
+       - `buffer` 儲存數值。
+       
     核心邏輯架構 (Core Architecture):
     -------------------------------
     1. **環狀陣列 (Circular Buffer)**:
-       使用 (Value, Timestamp) 雙陣列結構存儲 OBI。
-       使用 (Value, Tag) 結構存儲 OFI。
-
-    2. **OFI Flow Control (Set-Based)**:
-       Update: 將對應 Index 加入 `pending_ofi_indices` (Set)。
-       Get: 遍歷 Set。若 `ts_tag[idx] <= tick_ts` -> 累加 Flow 並從 Set 移除，清空 Slot。
+       存儲 OBI/OFI 數值與 Tag。
+    
+    2. **OFI Flow Control (Heap-Based)**:
+       Update: `heapq.heappush(heap, (ts, idx))`.
+       Get: `while heap and heap[0][0] <= tick_ts`: pop & consume.
        
-    3. **OBI State Persistence (Tag-Based)**:
-       Update: 若 `ts_tag != current_ts` -> 重置。
-       Get: 若 `ts_tag[tick_ts] == tick_ts` -> 計算平均。否則回傳 Fallback。
+    3. **Deduplication**:
+       使用 Set `active_push_signatures` (ts, idx) 避免同一毫秒重複 Push 到 Heap，
+       雖然 Heap 重複 Pop 沒壞處 (Buffer 會被清空)，但減少 Heap Size 有助於效能。
     """
     
     def __init__(self):
@@ -58,8 +60,13 @@ class LOBEngine:
         self.ofi_ts_buffer = [-1] * BUFFER_SIZE
         self.obi_ts_buffer = [-1] * BUFFER_SIZE
         
-        # ACTIVE INDEX SET (For OFI Sparse/Late Data)
-        self.pending_ofi_indices = set()
+        # ACTIVE PRIORITY QUEUE (For Time-Ordered Access)
+        # Elements: (timestamp, index)
+        self.pending_ofi_heap = []
+        
+        # [Optimization] To avoid duplicate heap pushes for the same slot update
+        # (Though duplicate pops are safe, keeping heap small is better)
+        self.active_push_set = set()
         
         # 3. 去重狀態 (Deduplication State)
         self.last_quote_signature = None
@@ -71,7 +78,7 @@ class LOBEngine:
         
     def update(self, quote):
         """
-        接收 Kafka BidAsk (Quote) 訊息並更新內部狀態 (O(1) Tagged Access).
+        接收 Kafka BidAsk (Quote) 訊息並更新內部狀態 (O(log N) Heap Push).
         """
         
         # --- 1. 嚴格去重 (Strict Deduplication) ---
@@ -114,17 +121,16 @@ class LOBEngine:
         
         # [OFI] Check Tag Mismatch (New Millisecond or Wrap Around)
         if self.ofi_ts_buffer[idx] != ts:
-            # 這是新的一毫秒 (或是從很久以前 Wrap 回來的)
-            # 如果舊資料還沒被消費，這裡直接覆蓋會導致 Flow 遺失！
-            # 但既然 Tag 不對，代表 Set 裡面可能還有這個 idx pointing to OLD data?
-            # 這種情況 (Wrap Around Collision Unconsumed) 在 65秒 Buffer 下極罕見。
-            # 我們假設舊的已經被消費了，或者我們必須接受覆蓋。
-            
             self.ofi_buffer[idx] = 0.0 # Reset
             self.ofi_ts_buffer[idx] = ts # Update Tag
         
         self.ofi_buffer[idx] += flow_delta
-        self.pending_ofi_indices.add(idx) # Mark as Active
+        
+        # [Heap Optimization] Push only if not already tracked for this generic slot-time
+        # 注意: 這裡的 Key 是 (ts, idx)。因為 Buffer 覆蓋機制，我們只關心 "該時間點的該 Slot 有資料"。
+        if (ts, idx) not in self.active_push_set:
+            heapq.heappush(self.pending_ofi_heap, (ts, idx))
+            self.active_push_set.add((ts, idx))
         
         # [OBI] Check Tag Mismatch
         if self.obi_ts_buffer[idx] != ts:
@@ -139,49 +145,39 @@ class LOBEngine:
         self.last_bid_vol_sum = bid_vol_sum
         self.last_ask_vol_sum = ask_vol_sum
         
-        # (無須執行 buckets cleanup，環狀陣列會自動覆寫舊資料)
-
     def get_metrics(self, tick_ts: int) -> Tuple[float, float, float]:
         """
-        取得指定 Tick 時間點的 LOB 指標 (Set Iteration).
+        取得指定 Tick 時間點的 LOB 指標 (Heap Access).
         """
         
         lag = self.max_seen_ts - tick_ts
         
-        # --- OFI 計算：Set 遍歷 (Sparse Consumption) ---
-        # 替代 Range Scan，改用 Set 遍歷，解決 Late Data 問題。
-        # 只要 pending_ofi_indices 裡的資料時間 <= tick_ts，全部結算。
+        # --- OFI 計算：Heap 提取 (Ordered Consumption) ---
+        # 優勢: 
+        # 1. 快速停止: 若 heap[0].ts > tick_ts，立即停止 loop (O(1))。
+        # 2. 自動排序: 總是先處理最早的資料，符合時間序。
         
         accumulated_ofi = 0.0
-        consumed_indices = []
         
-        # 這裡的 copy (list) 是必須的，因為我們會在迴圈中移除元素吗？
-        # 不，通常是收集後移除。
-        # [Performance] Set iteration is fast if sparse.
-        
-        # 優化: 暫存 list
-        for idx in list(self.pending_ofi_indices):
-            # 檢查這個 Slot 的時間是否 <= tick_ts
-            ts_in_slot = self.ofi_ts_buffer[idx]
+        while self.pending_ofi_heap:
+            # Peek minimal timestamp
+            min_ts, idx = self.pending_ofi_heap[0]
             
-            # 1. 正常資料: ts <= tick_ts -> 結算
-            # 2. 未來資料: ts > tick_ts -> 保留 (Future Flow)
-            # 3. 髒資料 (Wrap Around)? Update 會處理掉 Tag。
-            #    若 ts_tag 還是舊的 (但沒被 Update 清掉)，理論上是不符合 `ts_in_slot <= tick_ts` 的?
-            #    除非 tick_ts 繞了一圈追上來? -> 65秒延遲，假設不會發生。
+            if min_ts > tick_ts:
+                # 遇到未來資料 -> 停止計算 (這些資料屬於更晚的 Tick)
+                break
             
-            if ts_in_slot != -1 and ts_in_slot <= tick_ts:
+            # Pop valid item
+            heapq.heappop(self.pending_ofi_heap)
+            self.active_push_set.remove((min_ts, idx))
+            
+            # Check consistency (Wrap around protection)
+            if self.ofi_ts_buffer[idx] == min_ts:
+                # 加總並清空
                 accumulated_ofi += self.ofi_buffer[idx]
-                
-                # Consumed Logic
-                self.ofi_buffer[idx] = 0.0 # Clear Value
-                self.ofi_ts_buffer[idx] = -1 # Clear Tag (Optional, for safety)
-                consumed_indices.append(idx)
-        
-        # 批次移除 Active Set
-        for idx in consumed_indices:
-            self.pending_ofi_indices.remove(idx)
-        
+                self.ofi_buffer[idx] = 0.0 
+                # self.ofi_ts_buffer[idx] = -1 # Keep tag to allow duplicate check if needed, but value is gone.
+            
         self.last_read_ts = tick_ts
             
         # --- OBI 計算：時間戳平均 ---
@@ -194,10 +190,5 @@ class LOBEngine:
             if count > 0:
                 avg_obi = self.obi_sum_buffer[idx] / count
                 self.last_avg_obi = avg_obi
-                # 不清除！讓同毫秒的後續 Tick 能讀到同樣的值
-                # 但因為 OBI update 是 +=，若不歸零，65秒後的新數據會疊加在舊數據上。
-                # 所以：必須歸零！ (此處已由 update 邏輯中的 tag 檢查自動處理)
-                # self.obi_sum_buffer[idx] = 0.0
-                # self.obi_count_buffer[idx] = 0
                 
         return avg_obi, accumulated_ofi, float(lag)

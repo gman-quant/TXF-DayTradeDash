@@ -241,8 +241,13 @@ class IngestServer:
                     processed_count += len(ready_ticks)
                 
                 # Batch log
-                if processed_count > 0 and (processed_count % 5000 < len(ready_ticks)):
-                     logger.info(f"Processed Ticks: {processed_count}, Quotes: {quote_count}, Pending: {len(pending_ticks)}, Forced Flushes: {forced_flush_count}. LOB Watermark: {max_quote_ts}")
+                log_interval = 5000 if self.args.mode == 'history' else 2000
+                if processed_count > 0 and (processed_count % log_interval < len(ready_ticks)):
+                     # Calculate average lag for this batch
+                     batch_lags = [m[2] for m in ready_lob_metrics]
+                     avg_lag = sum(batch_lags) / len(batch_lags) if batch_lags else 0.0
+                     
+                     logger.info(f"Processed Ticks: {processed_count}, Quotes: {quote_count}, Pending: {len(pending_ticks)}. LOB Lag: {avg_lag:.1f}ms. Watermark: {max_quote_ts}")
 
                 if not self.running or ingestion_complete:
                     break
