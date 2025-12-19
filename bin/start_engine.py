@@ -211,6 +211,14 @@ class CoreSupervisor:
                "--port", str(port),
                "--capacity", str(capacity)]
         
+        # [New] Pass history context for Filename Generation
+        if hasattr(self.args, 'mode'):
+            cmd.extend(["--mode", self.args.mode])
+        if getattr(self.args, 'date', None):
+            cmd.extend(["--date", self.args.date])
+        if getattr(self.args, 'session', None):
+            cmd.extend(["--session", self.args.session])
+        
         logger.info(f"Starting Dashboard Process: {' '.join(cmd)}")
         self.dash_process = subprocess.Popen(cmd)
 

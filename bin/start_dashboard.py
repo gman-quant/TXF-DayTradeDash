@@ -90,7 +90,7 @@ class DashboardRunner:
         logger.info(f"📊 Starting Dashboard Server on port {self.args.port}...")
         try:
             # 這裡會卡住 Main Thread 直到結束
-            start_dashboard_server(self.manager, port=self.args.port)
+            start_dashboard_server(self.manager, port=self.args.port, args=self.args)
         except Exception as e:
             logger.error(f"Dashboard Server Error: {e}")
         finally:
@@ -106,6 +106,11 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=8050, help="Dashboard port")
     # [Multi-Day] Add capacity argument
     parser.add_argument('--capacity', type=int, default=200000, help="RingBuffer Capacity")
+    
+    # [History Context]
+    parser.add_argument('--mode', type=str, default='live')
+    parser.add_argument('--date', type=str, help='History Date')
+    parser.add_argument('--session', type=str, help='History Session')
     args = parser.parse_args()
     
     runner = DashboardRunner(args)

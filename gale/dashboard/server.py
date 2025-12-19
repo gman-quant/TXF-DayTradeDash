@@ -26,7 +26,7 @@ except ImportError:
 # 🚀 Dashboard Server Entry Point
 # =============================================================================
 
-def start_dashboard_server(indicator_manager, port=8050):
+def start_dashboard_server(indicator_manager, port=8050, args=None):
     """
     啟動 Dash 儀表板伺服器。
     整合 Layout、Logic 與 Callbacks，負責即時數據的前後端交互。
@@ -225,7 +225,11 @@ def start_dashboard_server(indicator_manager, port=8050):
         
         # 判斷盤別 (Day vs Night)
         # Night Session: 15:00 ~ 05:00 (of next day)
-        if now.hour < 8:
+        if args and args.mode == 'history' and args.date:
+            # [History Mode] Use Replay Date/Session
+            date_str = args.date
+            suffix = '-n' if args.session == 'night' else ''
+        elif now.hour < 8:
             # 凌晨時段屬於前一天的夜盤
             date_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
             suffix = '-n'
