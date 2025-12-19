@@ -10,8 +10,8 @@ import signal
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gale.infra.memory import SharedRingBuffer
-from gale.alpha.handler import IndicatorManager
-from gale.dashboard.server import start_dashboard_server
+from gale.alpha.manager import IndicatorManager
+from gale.dashboard.app import start_dashboard_server
 
 # Logging
 logging.basicConfig(

@@ -1,6 +1,6 @@
 
 """
-gale/dashboard/state.py
+gale.dashboard.data_model.py
 
 負責處理儀表板的「狀態與數據 (State & Data)」。
 
@@ -123,7 +123,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
 
     # [NEW] VWAP Bands Calculation (On-the-fly)
     if 'close' in view_history and 'volume' in view_history:
-        import gale.alpha.engine as ne
+        import gale.alpha.numba_lib as ne
         close_arr = view_history['close']
         vol_arr = view_history['volume']
         # [Session-Aware Fix] Pass timestamp for reset detection

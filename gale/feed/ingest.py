@@ -6,7 +6,7 @@ import sys
 import argparse
 from datetime import datetime
 from data_schemas.txf_data_pb2 import Tick
-from gale.feed.adapter import GaleKafkaConsumer
+from gale.feed.kafka_client import GaleKafkaConsumer
 from gale.infra.memory import SharedRingBuffer
 from config.txf_calendar import get_current_session_offset
 
@@ -58,7 +58,7 @@ class IngestServer:
         )
         
         # 3. [LOB Integration] Initialize LOB Engine
-        from gale.alpha.lob import LOBEngine
+        from gale.alpha.orderbook import LOBEngine
         self.lob_engine = LOBEngine()
         
         # Pre-allocate Tick object for reuse

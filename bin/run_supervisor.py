@@ -139,7 +139,7 @@ class CoreSupervisor:
             self.capacity = calc_capacity # Store for Dashboard
 
             # Construct Command
-            cmd = [sys.executable, "-m", "gale.feed.parquet"]
+            cmd = [sys.executable, "-m", "gale.feed.replay"]
             cmd.extend(txf_files) 
             
             if tse_files:
@@ -180,7 +180,7 @@ class CoreSupervisor:
             logger.info("📡 Data Source: Kafka Consumer")
             self.capacity = 200000 # Default for Kafka
             prev_close = self._load_prev_close()
-            cmd = [sys.executable, "-m", "gale.feed.server", 
+            cmd = [sys.executable, "-m", "gale.feed.ingest", 
                    "--broker", self.args.broker,
                    "--group", self.args.group,
                    "--topic", self.args.topic,
@@ -206,7 +206,7 @@ class CoreSupervisor:
         # [Capacity] Use self.capacity calculated in start_ingestion
         capacity = getattr(self, 'capacity', 200000)
 
-        cmd = [sys.executable, "-m", "bin.start_dashboard", 
+        cmd = [sys.executable, "-m", "bin.run_dashboard", 
                "--topic", self.args.topic,
                "--port", str(port),
                "--capacity", str(capacity)]

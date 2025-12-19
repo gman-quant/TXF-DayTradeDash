@@ -5,7 +5,7 @@ import logging
 import threading
 import argparse
 from gale.infra.memory import SharedRingBuffer
-from gale.alpha.handler import IndicatorManager
+from gale.alpha.manager import IndicatorManager
 from gale.strategy.position import PositionManager
 from gale.strategy.strategies.chop_reversal import ChopReversalStrategy
 

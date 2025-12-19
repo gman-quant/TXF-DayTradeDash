@@ -1,7 +1,7 @@
 # core/indicator_manager.py
 
 import numpy as np
-import gale.alpha.engine as engine
+import gale.alpha.numba_lib as engine
 from config.indicator_config import INDICATORS_SETUP
 from config.settings import TIMEFRAMES
 from gale.alpha.profile import VolumeProfileEngine

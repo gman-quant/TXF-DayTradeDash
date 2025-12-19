@@ -1,6 +1,6 @@
 
 import asyncio
-from gale.feed.adapter import GaleKafkaConsumer
+from gale.feed.kafka_client import GaleKafkaConsumer
 from datetime import datetime
 from collections import defaultdict
 from data_schemas.txf_data_pb2 import BidAsk
