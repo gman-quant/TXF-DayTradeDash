@@ -31,7 +31,7 @@ class IndicatorManager:
         # 這些 Array 與 SharedMemory 是分離的，用於存儲指標計算結果與本地快照
         self.history = {
             "timestamp": np.zeros(buffer_capacity, dtype=np.int64),
-            "close": np.zeros(buffer_capacity, dtype=np.int64),
+            "close": np.zeros(buffer_capacity, dtype=np.float64),
             "volume": np.zeros(buffer_capacity, dtype=np.int64),
         }
         
