@@ -78,14 +78,14 @@ pip install -r requirements.txt
 
 ## 🚀 如何執行 (Usage)
 
-V1.0 版本統一使用 `bin.start_engine` 作為入口：
+V1.0 版本統一使用 `bin.run_supervisor` 作為入口：
 
 ### 1. 實時監控模式 (Live Mode)
 
 預設連接 Kafka 並開始接收即時 Tick。
 
 ```bash
-python -m bin.start_engine
+python -m bin.run_supervisor
 ```
 
 ### 2. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]
@@ -98,10 +98,10 @@ python -m bin.start_engine
  
  ```bash
  # 播放單日 (預設速度 1.0x)
- python bin/start_engine.py --source parquet --date 2025-12-08
+ python bin/run_supervisor.py --source parquet --date 2025-12-08
  
  # 播放多日連續行情 (e.g. 12/08 ~ 12/11)
- python bin/start_engine.py --source parquet --date 2025-12-08 --end-date 2025-12-11
+ python bin/run_supervisor.py --source parquet --date 2025-12-08 --end-date 2025-12-11
  ```
  
  #### (B) 極速全歷史分析 (Instant Load / Static Analysis)
@@ -111,7 +111,7 @@ python -m bin.start_engine
  
  ```bash
  # 加上 --speed 0 啟用極速模式 (數十萬筆資料秒開)
- python bin/start_engine.py --source parquet --date 2025-12-08 --end-date 2025-12-11 --speed 0
+ python bin/run_supervisor.py --source parquet --date 2025-12-08 --end-date 2025-12-11 --speed 0
  ```
  
  > **💡 Smart CLI Behavior:**
@@ -150,8 +150,8 @@ python -m bin.start_engine
 ```text
 txf-gale-engine/
 ├── bin/                # 🚀 執行入口 (Launchers)
-│   ├── start_engine.py      # 主程式入口
-│   └── start_dashboard.py   # Dashboard 獨立進程
+│   ├── run_supervisor.py      # 主程式入口 (統一啟動 Ingest/Strategy/Dash)
+│   └── run_dashboard.py       # Dashboard 獨立進程 (由 Supervisor 呼叫)
 ├── gale/               # 📦 核心套件
 │   ├── infra/          # 基礎設施 (Memory)
 │   ├── feed/           # 數據源 (Kafka)
