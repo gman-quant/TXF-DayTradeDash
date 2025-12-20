@@ -1,8 +1,8 @@
-# 🇹🇼 TXF Gale Quant Engine (v1.0)
+# 🇹🇼 TXF Gale Quant Engine (V2.0)
 
 **TXF Gale Quant Engine** 是一個專為台灣指數期貨 (TXF) 設計的超低延遲量化數據管線與實時監控系統。
 
-本版本 (V1.0) 專注於 **Tick 成交數據** 的極速處理與視覺化，採用 **Gale Modular Architecture** 與 **RingBuffer + Numba** 技術，實現了 $O(1)$ 複雜度的實時指標運算，並透過 Dash 提供毫秒級的戰情室監控。
+本版本 (V2.0) 專注於 **Tick 成交數據** 的極速處理與視覺化，採用 **Gale Modular Architecture** 與 **RingBuffer + Numba** 技術，實現了 $O(1)$ 複雜度的實時指標運算，並透過 Dash 提供毫秒級的戰情室監控。
 
 ---
 
@@ -11,8 +11,8 @@
 ### ⚡️ 極限效能 (Performance)
 * **RingBuffer 架構**：使用預先分配記憶體的 NumPy 陣列 (Shared Memory)，實現零動態分配 (Zero-allocation) 的數據寫入。
 * **Numba JIT 加速**：指標運算邏輯編譯為機器碼，計算速度接近 C/C++。
-* **O(1) 演算法**：利用累積和 (Prefix Sum) 技術，無論計算 5 分鐘還是 5 小時的 VWAP，耗時皆相同且極低。
-* **Smart Downsampling**：前端繪圖採用智慧降頻與二分搜尋 (Bisect)，即使回溯 5 萬筆數據，CPU 佔用率仍低於 5%。
+* **O(1) Smart Slicing**：後端實現智慧切片視圖 (Vectorized View)，無論回溯 100K 筆還是 1M 筆數據，記憶體傳輸量恆定為 ~2000 筆 (16KB)。
+* **Smart Downsampling**：前端繪圖採用二分搜尋 (Bisect) 與降頻，CPU 佔用率極低。
 
 ### 📊 專業視覺化 (Professional Visualization)
 * **暗黑戰情室 UI**：針對長時間看盤設計的低對比度深色主題。

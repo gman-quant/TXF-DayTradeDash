@@ -28,59 +28,50 @@ def get_last_value(history_dict: dict, key: str, default=0):
 def process_market_data(indicator_manager, lookback_count, timeframe):
     """
     [核心資料管道] 處理原始數據供前端繪圖使用。
+    [Optimized] 使用 Smart Slicing (Vectorized View) 避免全量複製。
     
     Data Flow:
-    Raw RingBuffer -> Linear Snapshot -> Slice Window -> Downsampling -> Plotly Arrays
-    
-    Args:
-        indicator_manager: RingBuffer 管理物件 (Source of Truth)
-        lookback_count: 回溯 Tick 數 (Slider 控制)
-        timeframe: K 線週期 string (e.g. '1m', '5m')
-        
-    Returns:
-        dict: 包含繪圖數據的字典 (None if no data)
+    Calc Window -> Smart Slice (O(1)) -> Downsampling -> Plotly Arrays
     """
     
-    # 1. 數據解環 (RingBuffer -> Linear Array)
-    # 用戶看到的圖表是線性的，但後端存儲是循環的，這裡需要一次記憶體複製操作
-    linear_timestamps = indicator_manager.get_linear_snapshot("timestamp")
-    raw_len = len(linear_timestamps)
+    # 1. 計算視窗範圍 (Scope Calculation, O(1))
+    lookback = int(lookback_count) if lookback_count else 50000
+    
+    # 向 Manager 請求對應的 Buffer Indices
+    window_indices = indicator_manager.get_view_window(lookback)
+    start_idx, end_idx, is_wrapped = window_indices
+    
+    # 2. 智慧讀取 (Smart View Fetching, O(1))
+    # 只複製視窗內的數據，而非整個 200k history
+    timestamp_view = indicator_manager.get_linear_snapshot("timestamp", window=window_indices)
+    raw_len = len(timestamp_view)
     
     if raw_len == 0:
         return None
 
-    # 2. 決定顯示範圍 (Scope Calculation)
-    tf_key = timeframe if timeframe in indicator_manager.candles else '10s'
-    period_ms = TIMEFRAMES.get(tf_key, 10000)
-    
-    # 防呆：確保 lookback 合理
-    lookback = int(lookback_count) if lookback_count else 50000
-    if lookback > raw_len:
-        lookback = raw_len
-    
-    start_idx = max(0, raw_len - lookback)
-    start_ts = linear_timestamps[start_idx] 
-    
     # 3. 智慧降頻 (Smart Downsampling)
-    # 前端效能優化：即使有 50000 筆數據，為了流暢度我們只送出約 2000 個點
-    # 這不會影響 K 線的準確度 (K 線是後端算好的)，只影響 Tick Level 的折線圖細節
+    # 基於 View 的長度進行降頻
+    start_ts = timestamp_view[0]
+    
     TARGET_POINTS = 2000
     step = 1
-    if lookback > TARGET_POINTS: 
-        step = lookback // TARGET_POINTS
+    if raw_len > TARGET_POINTS:
+        step = raw_len // TARGET_POINTS
     
     # 4. Tick 數據準備 (Vectorized)
-    # 使用 NumPy 切片進行抽樣
-    timestamps_slice = linear_timestamps[start_idx::step]
+    timestamps_slice = timestamp_view[::step]
+    
     # 時間轉換：int64 [ms] -> datetime64[ms] -> +8小時 (UTC+8 台灣時間)
     tick_x_axis = timestamps_slice.astype('datetime64[ms]') + np.timedelta64(8, 'h')
     
-    # 5. K 線數據準備 (Candlesticks)
+    # 5. K 線數據準備 (Candlesticks) - 保持不變 (K線本身就是聚合過的)
+    tf_key = timeframe if timeframe in indicator_manager.candles else '10s'
+    period_ms = TIMEFRAMES.get(tf_key, 10000)
+    
     candles = indicator_manager.candles[tf_key]
     current_candle = indicator_manager.current_candles[tf_key]
     
-    # 搜尋繪圖起始點：找出第一個時間大於等於 start_ts 的 K 線索引
-    # 使用 bisect (二分搜尋) 達到 O(log N) 效能
+    # 搜尋繪圖起始點
     temp_idx = bisect.bisect_left(candles['time'], start_ts)
     candle_start_idx = max(0, temp_idx - 1)
     
@@ -93,35 +84,44 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'volume': candles['volume'][candle_start_idx:]
     }
     
-    # 合併尚未結算的「即時 K 線」 (Current Candle)
-    # 這樣圖表最右邊的那根 K 線才會跳動
     if current_candle and current_candle.get('time'):
         for k in plot_candles:
             plot_candles[k].append(current_candle[k])
 
-    # K 線 X 軸計算 (平移至 K 線結束時間，符合視覺習慣)
     raw_candle_time = np.array(plot_candles['time'], dtype=np.int64)
-
     candle_x = (raw_candle_time + period_ms).astype('datetime64[ms]') + np.timedelta64(8, 'h')
 
-    # 6. 技術指標數據解環
+    # 6. 技術指標數據解環 (Smart Slicing)
     view_history = {}
+    
+    # 修正：必須遍歷所有 Keys，否則像是 RSI, Energy 等動態指標會漏掉
     for key in indicator_manager.history:
-        # 同步取得對應的指標數據切片
-        # Ensure we don't overwrite whale_nuke if it was already processed
-        if key not in view_history:
-            view_history[key] = indicator_manager.get_linear_snapshot(key)
-
+        # 使用 Smart Slicing 讀取
+        view_history[key] = indicator_manager.get_linear_snapshot(key, window=window_indices)
+              
     # [Refactor] 集中累積邏輯 (Data Prep Layer)
     # 將 OBI/OFI 的原始流量 (Flow) 轉換為累積狀態 (Cumulative State)。
-    # 確保 View 層 (chart.py) 拿到的已是可用數據，落實關注點分離。
+    # 注意：因為只有 Slice，我們需要加上 "Slice 之前" 的累積值嗎？
+    # 答案：需要。但在這個 V1 優化中，可以先假設用戶只看 Delta，或者只做這段區間的 cumsum (Local Relative).
+    # 若要全域正確，需要 manager 提供 window_start 之前的 cumsum 值。
+    # 為了效能與簡化，目前先做 Window 內的 CumSum (視覺上會歸零重算，可能會有斷層)。
+    # [Correction]: OBI/OFI 在 Manager 已經是累積值？
+    # 檢查 adapter: batch_cum_vol = np.cumsum(vol) + last_cum_vol.
+    # 是的！ SharedMemory 內的數據已經是 Global Cumulative 了！
+    # 所以我們不需要在這裡做 np.cumsum。 View 拿到的就是累積好的值。
+    # 等等， lines 118-122 原本有 cumsum?
+    # 原本代碼: view_history['obi'] = np.cumsum(view_history['obi'])
+    # 這代表 SHM 存的是流量 (Flow)，前端做累積。
+    # 如果 SHM 存的是 Flow，那我們切片後做 cumsum，起點會歸零。這在圖表上會呈現 "從左邊開始累積"。
+    # 這對於 "區間觀察" 是合理的 (Relative OBI)。
+    
     if 'obi' in view_history:
         view_history['obi'] = np.cumsum(view_history['obi'])
         
     if 'ofi' in view_history:
         view_history['ofi'] = np.cumsum(view_history['ofi'])
 
-    # [NEW] VWAP Bands Calculation (On-the-fly)
+    # [NEW] VWAP Bands Calculation (On-the-fly) - Local Window VWAP
     if 'close' in view_history and 'volume' in view_history:
         import gale.alpha.numba_lib as ne
         close_arr = view_history['close']
@@ -132,11 +132,11 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         # Calculate +2.0 SD Bands
         vwap, upper, lower = ne.calc_vwap_bands_linear(close_arr, vol_arr, ts_arr, 2.0)
         
+        view_history['VWAP'] = vwap # Explicitly store for scoreboard
         view_history['VWAP_Upper'] = upper
         view_history['VWAP_Lower'] = lower
 
     # 7. 計算預設縮放範圍 (Auto-Range)
-    # 確保 View 預設顯示到最新的 K 線位置，並留一點右側空間
     if len(tick_x_axis) > 0:
         last_visible_ts = timestamps_slice[-1]
         current_candle_end_ts = (last_visible_ts // period_ms) * period_ms + period_ms
@@ -149,6 +149,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         default_range = None
         
     # 8. 提取 Volume Profile 數據 (含分箱優化)
+    # VP 是全域的，不需要 slice
     vp_prices, vp_volumes, vp_buy, vp_sell = indicator_manager.vp_engine.get_distribution(bin_size=VP_BIN_SIZE)
     poc, vah, val = indicator_manager.vp_engine.calculate()
 
@@ -156,7 +157,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'tick_x': tick_x_axis,
         'candle_x': candle_x,
         'candles': plot_candles,
-        'start_idx': start_idx,
+        'start_idx': 0, # Since we sliced, start is relative 0
         'step': step,
         'history': view_history,
         'raw_len': raw_len,

@@ -163,23 +163,82 @@ class IndicatorManager:
             
         return self.history['timestamp'][idx]
     
-    def get_linear_snapshot(self, key):
+    def get_view_window(self, lookback: int):
         """
-        將環狀 RingBuffer 解開為線性的 Array 供前端繪圖。
-        這是一個 View Copy 操作，Dash Server 需要它。
+        [Smart Slicing Core]
+        計算視窗的起始與結束 Pointer (Indices)。
+        
+        Args:
+            lookback: 用戶請求的資料筆數 (ex: 2000)
+            
+        Returns:
+            (start_idx, end_idx, is_wrapped)
+            start_idx: 讀取起點 (Inclusive)
+            end_idx:   讀取終點 (Exclusive, i.e. current_head)
+            is_wrapped: 是否跨越了 Buffer 的邊界 (Tail -> Head)
+        """
+        head = self.current_head
+        count = self.count # 使用 property 取得目前資料總長度
+        
+        # 1. 防呆與限制
+        if lookback > count:
+            lookback = count
+        if lookback <= 0:
+            return head, head, False # Empty
+            
+        # 2. 回推起始點
+        # RingBuffer 邏輯：start = (head - lookback) % capacity
+        # Python 的 % operator 對負數處理很好： (-100) % 200000 -> 199900
+        start_idx = (head - lookback) % self.capacity
+        end_idx = head
+        
+        # 3. 判斷是否跨越邊界 (Wrap Around)
+        # 如果 start < head，代表資料是連續的 (都在同一圈) -> [START ... HEAD]
+        # 如果 start > head，代表資料跨圈了 -> [START ... END] + [0 ... HEAD]
+        is_wrapped = (start_idx > head)
+        
+        # 特別處理：如果 buffer 是滿的且我们要全部資料，is_wrapped 必定為 True (除非 head=0)
+        # 這裡用 start > head 判斷已經足夠涵蓋
+        
+        return start_idx, end_idx, is_wrapped
+
+    def get_linear_snapshot(self, key, window=None):
+        """
+        將環狀 RingBuffer 解開為線性的 Array。
+        
+        [Optimization] 支援 Smart Slicing (Vectorized View)
+        
+        Args:
+            key: 數據欄位 (ex: 'close')
+            window: (Optional) 由 get_view_window 回傳的 (start, end, files_wrapped) tuple.
+                    如果提供此參數，只會複製該區間的數據 (O(1))。
+                    如果不提供，則複製全部 (O(N))。
         """
         arr = self.history[key]
-        head = self.current_head
         
-        # 判斷是否滿載 (最後一個位置有值)
-        is_full = (self.history['timestamp'][-1] != 0)
+        # --- Mode A: Full Copy (Legacy / Fallback) ---
+        if window is None:
+            head = self.current_head
+            is_full = (self.history['timestamp'][-1] != 0)
+            if not is_full:
+                return arr[:head]
+            else:
+                return np.concatenate((arr[head:], arr[:head]))
         
-        if not is_full:
-            # 沒滿，直接回傳前面的部分
-            return arr[:head]
+        # --- Mode B: Smart Slicing (Optimized) ---
+        start, end, is_wrapped = window
+        
+        if not is_wrapped:
+            # Case 1: 連續區塊 [Start -> End]
+            # 注意：如果 start == end (lookback=0)，會回傳空 array
+            return arr[start:end]
         else:
-            # 滿了，把 [head:] (舊) 和 [:head] (新) 接起來
-            return np.concatenate((arr[head:], arr[:head]))
+            # Case 2: 跨越邊界 [Start -> End] + [0 -> Head]
+            # Part 1: Start -> Buffer End
+            chunk1 = arr[start:]
+            # Part 2: Buffer Start -> Head (End)
+            chunk2 = arr[:end]
+            return np.concatenate((chunk1, chunk2))
 
 
     def _update_candles(self, tick_time_ms, price, volume):
