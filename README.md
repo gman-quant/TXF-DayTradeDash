@@ -88,7 +88,15 @@ V1.0 版本統一使用 `bin.run_supervisor` 作為入口：
 python -m bin.run_supervisor
 ```
 
-### 2. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]
+### 2. Kafka 歷史回放模式 (History Mode)
+
+指定日期進行歷史數據回放。
+
+```bash
+python -m bin.run_supervisor --mode history --date 2025-12-24 --session night
+```
+
+### 3. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]
  
  V1.1 新增了基於 Parquet 檔案的高效回放引擎，支援多日連續回放與靜態全歷史分析。
  

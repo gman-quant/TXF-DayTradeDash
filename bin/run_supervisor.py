@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gale.strategy.engine import StrategyServer
 from gale.utils.log_utils import setup_logger
-from config.txf_calendar import NIGHT_SESSION_START
+from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
 from gale.infra.db import load_prev_close
 
 # Logging
@@ -198,26 +198,38 @@ class CoreSupervisor:
 
     def start_dashboard(self):
         """啟動 Dashboard Process (獨立進程)"""
-        # [Dynamic Port Selection]
-        # Live/Kafka -> 8050
-        # History (Parquet or Kafka Replay) -> 8051 (to avoid conflict with live)
+        # 1. 決定埠號
         port = 8051 if self.args.mode == 'history' else 8050
         
-        # [Capacity] Use self.capacity calculated in start_ingestion
+        # 2. 決定容量
         capacity = getattr(self, 'capacity', 200000)
 
-        cmd = [sys.executable, "-m", "bin.run_dashboard", 
-               "--topic", self.args.topic,
-               "--port", str(port),
-               "--capacity", str(capacity)]
+        # --- [核心修改點] 動態判定時段 ---
+        # 優先檢查是否為 live 模式，如果是，則根據時間自動切換
+        current_session = getattr(self.args, 'session', 'day') # 預設值
         
-        # [New] Pass history context for Filename Generation
+        if self.args.mode == 'live':
+            current_time = datetime.now().time()
+            # 判定 logic: 14:50 以後到隔天 08:42 以前都算 night
+            if current_time >= NIGHT_SESSION_START or current_time < DAY_SESSION_START:
+                current_session = "night"
+            else:
+                current_session = "day"
+            logger.info(f"🔄 Live Mode 偵測: 目前時間 {current_time} ({current_session} session)")
+        # ----------------------------
+
+        cmd = [sys.executable, "-m", "bin.run_dashboard", 
+            "--topic", self.args.topic,
+            "--port", str(port),
+            "--capacity", str(capacity)]
+        
         if hasattr(self.args, 'mode'):
             cmd.extend(["--mode", self.args.mode])
         if getattr(self.args, 'date', None):
             cmd.extend(["--date", self.args.date])
-        if getattr(self.args, 'session', None):
-            cmd.extend(["--session", self.args.session])
+        
+        # 使用我們剛剛動態判定的 current_session
+        cmd.extend(["--session", current_session])
         
         logger.info(f"Starting Dashboard Process: {' '.join(cmd)}")
         self.dash_process = subprocess.Popen(cmd)
