@@ -59,66 +59,106 @@ nano ~/Library/LaunchAgents/com.garrett.txf.gale_dashboard_supervisor.plist
         <string>-lc</string>
         <string>
             <![CDATA[
+            # ==========================================
+            # 1. 基礎路徑設定
+            # ==========================================
             PROJECT_DIR="/Users/gtai/Projects/txf-gale-engine"
             PROCESS_PATTERN="[b]in.run_supervisor"
             LAST_RESTART_FILE="/tmp/txf_gale_last_restart"
 
+            # ==========================================
+            # 2. 時間參數設定 (請依照 HHMM 格式修改)
+            # ==========================================
+            T_AM_START="0843"   # 日盤守護開始
+            T_AM_END="1458"     # 日盤守護結束
+            
+            T_PM_START="1458"   # 夜盤守護開始
+            T_PM_END="0843"     # 夜盤守護結束 (跨日)
+
+            # 強制重置點 (建議設在開盤後 1 分鐘作為緩衝)
+            T_RESET_AM="0844"   
+            T_RESET_PM="1459"   
+
+            # ==========================================
+            # 3. 核心監控迴圈
+            # ==========================================
             while true; do
                 WEEKDAY=$(date +%u)
                 HM=$(date +%H%M)
 
-                if [[ "$WEEKDAY" -ge 1 && "$WEEKDAY" -le 5 ]]; then
-                    # --- A. 判定時段 (IN_WINDOW) ---
+                # 判斷是否為週一至週六 (1-6)
+                if [[ "$WEEKDAY" -ge 1 && "$WEEKDAY" -le 6 ]]; then
+                    
+                    # --- A. 判定是否在交易時段 (IN_WINDOW) ---
                     IN_WINDOW=0
-                    if [[ "$HM" -ge 0830 && "$HM" -le 1345 ]]; then
-                        IN_WINDOW=1
-                    elif [[ "$HM" -ge 1450 || "$HM" -le 0500 ]]; then
-                        IN_WINDOW=1
+                    if [[ "$WEEKDAY" -le 5 ]]; then
+                        # 週一至週五：24小時無縫接軌判斷
+                        if [[ "$HM" -ge "$T_AM_START" && "$HM" -le "$T_AM_END" ]]; then
+                            IN_WINDOW=1
+                        elif [[ "$HM" -ge "$T_PM_START" || "$HM" -le "$T_PM_END" ]]; then
+                            IN_WINDOW=1
+                        fi
+                    elif [[ "$WEEKDAY" -eq 6 ]]; then
+                        # 週六：僅守護至夜盤結束時間 (08:43)
+                        # 08:43 之前還在 Window 內，08:44 會跳到 else 執行清理
+                        if [[ "$HM" -le "$T_PM_END" ]]; then
+                            IN_WINDOW=1
+                        fi
                     fi
 
-                    # --- B. 判定重置 (IS_RESET_TIME) ---
+                    # --- B. 判定是否為重置時間 (IS_RESET_TIME) ---
                     IS_RESET_TIME=0
-                    if [[ "$HM" == "0830" || "$HM" == "1450" ]]; then
-                        if [[ ! -f "$LAST_RESTART_FILE" || $(cat "$LAST_RESTART_FILE") != "$HM" ]]; then
+                    if [[ "$HM" == "$T_RESET_AM" || "$HM" == "$T_RESET_PM" ]]; then
+                        # 檢查標記檔內容，確保該分鐘內只執行一次重置
+                        if [[ ! -f "$LAST_RESTART_FILE" || $(cat "$LAST_RESTART_FILE" 2>/dev/null) != "$HM" ]]; then
                             IS_RESET_TIME=1
                         fi
                     fi
 
                     if [[ "$IN_WINDOW" -eq 1 ]]; then
-                        # 檢查是否需要啟動
-                        NEED_START=0
-                        if ! pgrep -f "$PROCESS_PATTERN" > /dev/null; then
-                            NEED_START=1
-                        elif [[ "$IS_RESET_TIME" -eq 1 ]]; then
-                            NEED_START=1
-                        fi
+                        # 核心判斷：程式沒在跑 OR 觸發重置時間
+                        if ! pgrep -f "$PROCESS_PATTERN" > /dev/null || [[ "$IS_RESET_TIME" -eq 1 ]]; then
+                            
+                            if [[ "$IS_RESET_TIME" -eq 1 ]]; then
+                                echo "[$(date)] >>> 【計畫重置】緩衝時間已到 ($HM)，執行先殺後開 <<<"
+                            else
+                                echo "[$(date)] >>> 【守護啟動】偵測進程缺失，正在拉起程序... <<<"
+                            fi
 
-                        if [[ "$NEED_START" -eq 1 ]]; then
-                            echo "[$(date)] >>> 執行啟動/重置程序 (HM: $HM) <<<"
+                            # 啟動前強制清理
                             pkill -15 -f "$PROCESS_PATTERN" || true
                             sleep 2
+
                             if cd "$PROJECT_DIR"; then
                                 source .venv/bin/activate
                                 python -m bin.run_supervisor &
-                                [[ "$IS_RESET_TIME" -eq 1 ]] && echo "$HM" > "$LAST_RESTART_FILE"
+                                
+                                # 若為重置點，寫入標記檔
+                                if [[ "$IS_RESET_TIME" -eq 1 ]]; then
+                                    echo "$HM" > "$LAST_RESTART_FILE"
+                                fi
                             fi
                         fi
                     else
-                        # 非時段清理
+                        # --- 非交易時段清理 ---
                         if pgrep -f "$PROCESS_PATTERN" > /dev/null; then
-                            echo "[$(date)] 交易結束 ($HM)，關閉進程。"
+                            echo "[$(date)] 交易時段結束 ($HM)，執行關閉。"
                             pkill -15 -f "$PROCESS_PATTERN" || true
                         fi
-                        # 收盤後自動清理標記
-                        if [[ "$HM" -gt 0505 && "$HM" -lt 0825 ]]; then
+                        
+                        # 非時段內確保標記檔被移除，供下次開盤重置使用
+                        # 範圍設在夜盤結束後到日盤開始前
+                        if [[ "$HM" -gt "$T_PM_END" && "$HM" -lt "$T_AM_START" ]]; then
                             [[ -f "$LAST_RESTART_FILE" ]] && rm -f "$LAST_RESTART_FILE"
                         fi
                     fi
                 else
-                    # 週末清理
+                    # --- 週末清理 ---
                     [[ -f "$LAST_RESTART_FILE" ]] && rm -f "$LAST_RESTART_FILE"
-                    pgrep -f "$PROCESS_PATTERN" > /dev/null && pkill -15 -f "$PROCESS_PATTERN"
+                    pgrep -f "$PROCESS_PATTERN" > /dev/null && pkill -15 -f "$PROCESS_PATTERN" || true
                 fi
+
+                # 每 20 秒檢查一次
                 sleep 20
             done
             ]]>
@@ -135,7 +175,6 @@ nano ~/Library/LaunchAgents/com.garrett.txf.gale_dashboard_supervisor.plist
     <string>/tmp/txf_gale_dashboard_supervisor.err.log</string>
 </dict>
 </plist>
-
 ```
 
 ---
