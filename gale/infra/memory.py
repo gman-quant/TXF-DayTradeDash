@@ -52,6 +52,8 @@ class SharedRingBuffer:
             ('obi',              np.float64, 8),
             ('ofi',              np.float64, 8),
             ('lob_lag',          np.float64, 8),
+            # [VWAP Optimization]
+            ('cum_pv_sq',        np.float64, 8),
         ]
         
         # 計算總大小
@@ -162,34 +164,59 @@ class SharedRingBuffer:
         self.close[idx] = price
         self.underlying_price[idx] = tick.underlying_price / 10000.0
 
-        # --- 2. 狀態與累積更新 ---
+        # --- 2. 狀態與累積更新 (Session Reset Logic) ---
         buy_vol  = tick.volume if tick.tick_type == 1 else 0
         sell_vol = tick.volume if tick.tick_type == 2 else 0
+        pv       = price * tick.volume
+        pv_sq    = price * price * tick.volume
+        
+        # 重置檢測
+        # Day Session Start: ~08:45 (Gap > 1hr from prev)
+        # Night Session Start: ~15:00 (Gap > 1hr from prev)
+        RESET_THRESHOLD_MS = 3600000 # 1 hour
         
         is_first_tick = (self.head == 0 and not self.is_full)
+        should_reset = is_first_tick
         
-        if is_first_tick:
+        if not is_first_tick:
+            prev_ts = self.timestamp[prev_idx]
+            # [Fix] 如果 prev_ts 是 0 (buffer剛初始化)，也視為 reset
+            if prev_ts == 0:
+                should_reset = True
+            else:
+                dt = tick.timestamp_ms - prev_ts
+                if dt > RESET_THRESHOLD_MS:
+                    should_reset = True
+        
+        if should_reset:
+            # [Reset State]
             self.session_high[idx] = price
             self.session_low[idx]  = price
             
             self.cum_volume[idx]   = tick.volume
-            self.cum_pv[idx]       = price * tick.volume
-            self.cum_close[idx]    = price
+            self.cum_pv[idx]       = pv
+            self.cum_pv_sq[idx]    = pv_sq
             self.cum_buy_vol[idx]  = buy_vol
             self.cum_sell_vol[idx] = sell_vol
+            
+            # cum_close 不重置，為了 SMA 連續性
+            # 若是第一筆，則為 price；若重置但非第一筆，延續上一筆
+            if is_first_tick:
+                self.cum_close[idx] = price
+            else:
+                self.cum_close[idx] = self.cum_close[prev_idx] + price
+                
         else:
+            # [Accumulate]
             prev_high = self.session_high[prev_idx]
             prev_low  = self.session_low[prev_idx]
             
-            if prev_high == 0: 
-                self.session_high[idx] = price
-                self.session_low[idx]  = price
-            else:
-                self.session_high[idx] = max(prev_high, price)
-                self.session_low[idx]  = min(prev_low, price)
+            self.session_high[idx] = max(prev_high, price)
+            self.session_low[idx]  = min(prev_low, price)
             
             self.cum_volume[idx]   = self.cum_volume[prev_idx]   + tick.volume
-            self.cum_pv[idx]       = self.cum_pv[prev_idx]       + (price * tick.volume)
+            self.cum_pv[idx]       = self.cum_pv[prev_idx]       + pv
+            self.cum_pv_sq[idx]    = self.cum_pv_sq[prev_idx]    + pv_sq
             self.cum_close[idx]    = self.cum_close[prev_idx]    + price
             self.cum_buy_vol[idx]  = self.cum_buy_vol[prev_idx]  + buy_vol
             self.cum_sell_vol[idx] = self.cum_sell_vol[prev_idx] + sell_vol
@@ -240,7 +267,7 @@ class SharedRingBuffer:
             ofi_arr = np.zeros(n, dtype=np.float64)
             lag_arr = np.zeros(n, dtype=np.float64)
         
-        # 2. 計算累積數據 (Vectorized Cumulative)
+        # 2. 計算累積數據 (Vectorized Cumulative with Session Reset)
         # 需要取得當前 Buffer 裡 "上一筆" 的累積值
         current_head = self.head
         prev_idx = current_head - 1
@@ -249,34 +276,100 @@ class SharedRingBuffer:
         # Base values from previous state
         last_cum_vol = self.cum_volume[prev_idx]
         last_cum_pv = self.cum_pv[prev_idx]
+        last_cum_pv_sq = self.cum_pv_sq[prev_idx] # New
         last_cum_close = self.cum_close[prev_idx]
         
         last_cum_buy = self.cum_buy_vol[prev_idx]
         last_cum_sell = self.cum_sell_vol[prev_idx]
         
-        # Vectorized CumSum for the batch
-        batch_cum_vol = np.cumsum(vol_arr) + last_cum_vol
-        batch_cum_pv  = np.cumsum(price_arr * vol_arr) + last_cum_pv
-        batch_cum_close = np.cumsum(price_arr) + last_cum_close
+        # [Session Reset Handling for Batch]
+        # 這比單點複雜，因為一個 batch 可能橫跨 session。
+        # 策略：
+        # 1. 找出 Batch 內部的 Session Breakpoints (Delta Time > Threshold)
+        # 2. 針對每個區段做 cumsum，並在斷點處歸零。
         
-        # Buy/Sell Volume Separation
+        RESET_THRESHOLD_MS = 3600000
+        
+        # A. 計算時間差
+        # 第一筆跟上一筆比
+        dt_first = ts_arr[0] - self.timestamp[prev_idx]
+        
+        # 內部相鄰互比: ts[i] - ts[i-1]
+        # np.diff 回傳長度 n-1
+        dt_internal = np.diff(ts_arr)
+        
+        # 組合完整的 dt 陣列
+        all_dts = np.concatenate(([dt_first], dt_internal))
+        
+        # 找出斷點 (Boolean Mask)
+        reset_mask = (all_dts > RESET_THRESHOLD_MS)
+        
+        # 如果前一筆是空的 (first start)，第一筆也要當作 reset
+        if current_head == 0 and not self.is_full:
+            reset_mask[0] = True
+            
+        # B. 執行分段累積 (Vectorized Grouped Cumsum)
+        # 技巧：使用 "Reset Group ID"
+        # 每次遇到 reset=True，Group ID + 1。
+        # 然後對每個 Group ID 各自做 cumsum。
+        
+        group_ids = np.cumsum(reset_mask)
+        
+        # 計算原始增量 (Flow)
+        pv_flow = price_arr * vol_arr
+        pv_sq_flow = price_arr * price_arr * vol_arr
+        
+        # 預分配結果陣列
+        batch_cum_vol = np.zeros(n, dtype=np.int64)
+        batch_cum_pv = np.zeros(n, dtype=np.float64)
+        batch_cum_pv_sq = np.zeros(n, dtype=np.float64)
+        batch_cum_buy = np.zeros(n, dtype=np.int64)
+        batch_cum_sell = np.zeros(n, dtype=np.int64)
+        
         buy_mask = (type_arr == 1)
         sell_mask = (type_arr == 2)
+        buy_flow = np.where(buy_mask, vol_arr, 0)
+        sell_flow = np.where(sell_mask, vol_arr, 0)
         
-        # numpy where to create 0/vol arrays
-        buy_vols = np.where(buy_mask, vol_arr, 0)
-        sell_vols = np.where(sell_mask, vol_arr, 0)
+        # 取得唯一的 group id (通常只有 1~2 個，因為換盤不頻繁)
+        unique_groups = np.unique(group_ids)
         
-        batch_cum_buy = np.cumsum(buy_vols) + last_cum_buy
-        batch_cum_sell = np.cumsum(sell_vols) + last_cum_sell
+        for gid in unique_groups:
+            # 遮罩選取該群組
+            mask = (group_ids == gid)
+            
+            # 局部累積 (Local Cumsum)
+            # 這些是 "從該 Group 起點" 開始累積的值
+            g_cum_vol = np.cumsum(vol_arr[mask])
+            g_cum_pv = np.cumsum(pv_flow[mask])
+            g_cum_pv_sq = np.cumsum(pv_sq_flow[mask])
+            g_cum_buy = np.cumsum(buy_flow[mask])
+            g_cum_sell = np.cumsum(sell_flow[mask])
+            
+            # 決定「基準值 (Base)」
+            # 如果這個 Group 是由 Reset 觸發的 (Reset Mask 為 True 的第一筆所屬 Group)，Base = 0
+            # 如果這個 Group 是延續上一筆 (通常是第一個 Group 且 reset_mask[0] False)，Base = last_cum
+            
+            is_continuation = (gid == group_ids[0]) and (not reset_mask[0])
+            
+            if is_continuation:
+                batch_cum_vol[mask] = g_cum_vol + last_cum_vol
+                batch_cum_pv[mask] = g_cum_pv + last_cum_pv
+                batch_cum_pv_sq[mask] = g_cum_pv_sq + last_cum_pv_sq
+                batch_cum_buy[mask] = g_cum_buy + last_cum_buy
+                batch_cum_sell[mask] = g_cum_sell + last_cum_sell
+            else:
+                # Reset Base = 0
+                batch_cum_vol[mask] = g_cum_vol
+                batch_cum_pv[mask] = g_cum_pv
+                batch_cum_pv_sq[mask] = g_cum_pv_sq
+                batch_cum_buy[mask] = g_cum_buy
+                batch_cum_sell[mask] = g_cum_sell
         
-        # Stateful High/Low (Need to be careful)
-        # Reset High/Low at 08:45 and 15:00... logic is complex in vectorized.
-        # 為了簡化，我們暫時使用 Python loop for High/Low state reset 
-        # 或者假設這批次內不會跨越開盤時間 (通常 batch 只包含幾百毫秒)
-        # 我們沿用上一筆的 Session High/Low 當作基準，然後跟自己的 batch 比較
+        # cum_close 保持不重置 (為了 SMA 連續性)
+        batch_cum_close = np.cumsum(price_arr) + last_cum_close
         
-        # 簡易實作：先用上一筆 High/Low，然後用 accumulate max 更新
+        # Stateful High/Low (Simplified for Batch)
         last_high = self.session_high[prev_idx]
         last_low = self.session_low[prev_idx]
         
@@ -284,12 +377,25 @@ class SharedRingBuffer:
         if last_high == 0: last_high = price_arr[0]
         if last_low == 0: last_low = price_arr[0]
         
-        # Numpy accumulate (Running Max)
-        batch_high = np.maximum.accumulate(price_arr)
-        batch_high = np.maximum(batch_high, last_high)
+        # 當遇到 Session Reset 時，High/Low 也應該重置
+        batch_high = np.zeros(n, dtype=np.float64)
+        batch_low = np.zeros(n, dtype=np.float64)
         
-        batch_low = np.minimum.accumulate(price_arr)
-        batch_low = np.minimum(batch_low, last_low)
+        for gid in unique_groups:
+            mask = (group_ids == gid)
+            prices_g = price_arr[mask]
+            
+            is_continuation = (gid == group_ids[0]) and (not reset_mask[0])
+            
+            g_high = np.maximum.accumulate(prices_g)
+            g_low = np.minimum.accumulate(prices_g)
+            
+            if is_continuation:
+                batch_high[mask] = np.maximum(g_high, last_high)
+                batch_low[mask] = np.minimum(g_low, last_low)
+            else:
+                batch_high[mask] = g_high
+                batch_low[mask] = g_low
         
         # 3. 寫入 Shared Memory (Slicing)
         # 處理 Ring Buffer Wrapping
@@ -317,6 +423,7 @@ class SharedRingBuffer:
             # Cumulative Arrays
             self.cum_volume[current_head:end] = batch_cum_vol
             self.cum_pv[current_head:end] = batch_cum_pv
+            self.cum_pv_sq[current_head:end] = batch_cum_pv_sq # New
             self.cum_close[current_head:end] = batch_cum_close
             self.cum_buy_vol[current_head:end] = batch_cum_buy
             self.cum_sell_vol[current_head:end] = batch_cum_sell
@@ -355,6 +462,7 @@ class SharedRingBuffer:
             
             self.cum_volume[current_head:] = batch_cum_vol[:first_len]
             self.cum_pv[current_head:] = batch_cum_pv[:first_len]
+            self.cum_pv_sq[current_head:] = batch_cum_pv_sq[:first_len] # New
             self.cum_close[current_head:] = batch_cum_close[:first_len]
             self.cum_buy_vol[current_head:] = batch_cum_buy[:first_len]
             self.cum_sell_vol[current_head:] = batch_cum_sell[:first_len]
@@ -381,6 +489,7 @@ class SharedRingBuffer:
 
             self.cum_volume[:remain_len] = batch_cum_vol[first_len:]
             self.cum_pv[:remain_len] = batch_cum_pv[first_len:]
+            self.cum_pv_sq[:remain_len] = batch_cum_pv_sq[first_len:] # New
             self.cum_close[:remain_len] = batch_cum_close[first_len:]
             self.cum_buy_vol[:remain_len] = batch_cum_buy[first_len:]
             self.cum_sell_vol[:remain_len] = batch_cum_sell[first_len:]
@@ -414,7 +523,8 @@ class SharedRingBuffer:
             self.obi,               # 13 [New]
             self.ofi,               # 14 [New]
             self.lob_lag,           # 15 [New]
-            self.head               # 16
+            self.cum_pv_sq,         # 16 [New VWAP]
+            self.head               # 17
         )
 
     def shutdown(self):

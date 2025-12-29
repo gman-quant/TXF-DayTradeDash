@@ -62,6 +62,11 @@ class IndicatorManager:
         self.history['ofi'] = np.zeros(buffer_capacity, dtype=np.float64)
         self.history['lob_lag'] = np.zeros(buffer_capacity, dtype=np.float64)
         
+        # [VWAP Optimization] Local Cache for Dashboard View
+        self.history['cum_pv'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['cum_volume'] = np.zeros(buffer_capacity, dtype=np.int64)
+        self.history['cum_pv_sq'] = np.zeros(buffer_capacity, dtype=np.float64)
+        
         # 🆕 有效量 (Effective Volume)
         # 用於存儲「重組後」的成交量。
         # 拆單 (Split Orders) 會被合併到第一筆，其餘設為 0。
@@ -120,6 +125,14 @@ class IndicatorManager:
                 # --- 籌碼數據 (Order Flow Data) ---
                 elif input_name == 'cum_buy_vol':  input_indices.append(11)
                 elif input_name == 'cum_sell_vol': input_indices.append(12)
+                
+                # [LOB Integration]
+                elif input_name == 'obi':          input_indices.append(13)
+                elif input_name == 'ofi':          input_indices.append(14)
+                elif input_name == 'lob_lag':      input_indices.append(15)
+
+                # [VWAP Optimization]
+                elif input_name == 'cum_pv_sq':    input_indices.append(16)
                 
                 # 🆕 Local History Mapping
                 elif input_name == 'effective_volume': input_indices.append(-1) # Special Flag
@@ -336,6 +349,12 @@ class IndicatorManager:
         self.history["obi"][curr_idx]     = float(snapshot_tuple[13][curr_idx])
         self.history["ofi"][curr_idx]     = float(snapshot_tuple[14][curr_idx])
         self.history["lob_lag"][curr_idx] = float(snapshot_tuple[15][curr_idx])
+        
+        # [VWAP Optimization] Copy from Snapshot used by Dashboard
+        # Indices: 5=cum_volume, 6=cum_pv, 16=cum_pv_sq
+        self.history["cum_pv"][curr_idx]     = float(snapshot_tuple[6][curr_idx])
+        self.history["cum_volume"][curr_idx] = int(snapshot_tuple[5][curr_idx])
+        self.history["cum_pv_sq"][curr_idx]  = float(snapshot_tuple[16][curr_idx])
         
         # ==========================================
         # 5. 大單重組 (Whale Reconstruction) - Effective Volume Logic

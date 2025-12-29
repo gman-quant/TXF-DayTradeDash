@@ -121,20 +121,49 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
     if 'ofi' in view_history:
         view_history['ofi'] = np.cumsum(view_history['ofi'])
 
-    # [NEW] VWAP Bands Calculation (On-the-fly) - Local Window VWAP
-    if 'close' in view_history and 'volume' in view_history:
-        import gale.alpha.numba_lib as ne
-        close_arr = view_history['close']
-        vol_arr = view_history['volume']
-        # [Session-Aware Fix] Pass timestamp for reset detection
-        ts_arr = view_history['timestamp'] 
+    # [NEW] VWAP Bands Calculation (Session-Based)
+    # 現在改為直接使用 SHM 中已經重置好的累積值 (cum_pv, cum_volume, cum_pv_sq)
+    # 不再依賴 Viewport，數值與 Session 絕對綁定。
+    if 'cum_pv' in view_history and 'cum_volume' in view_history:
+        cum_pv = view_history['cum_pv']
+        cum_vol = view_history['cum_volume']
+        # Handle cum_pv_sq if present (for StdDev)
+        cum_pv_sq = view_history.get('cum_pv_sq', None)
+
+        # Vectorized Division (O(1))
+        # Handle division by zero
+        valid_vol = cum_vol > 0
         
-        # Calculate +2.0 SD Bands
-        vwap, upper, lower = ne.calc_vwap_bands_linear(close_arr, vol_arr, ts_arr, 2.0)
+        vwap = np.full_like(cum_pv, np.nan)
+        np.divide(cum_pv, cum_vol, out=vwap, where=valid_vol)
         
-        view_history['VWAP'] = vwap # Explicitly store for scoreboard
-        view_history['VWAP_Upper'] = upper
-        view_history['VWAP_Lower'] = lower
+        # Calculate Bands
+        # StdDev = sqrt( E[X^2] - (E[X])^2 ) = sqrt( (cum_pv_sq / cum_vol) - vwap^2 )
+        std_dev = np.zeros_like(cum_pv)
+        
+        if cum_pv_sq is not None:
+            mean_sq = np.zeros_like(cum_pv)
+            np.divide(cum_pv_sq, cum_vol, out=mean_sq, where=valid_vol)
+            
+            variance = mean_sq - (vwap * vwap)
+            # Clip negative variance due to floating point consistency
+            variance[variance < 0] = 0.0
+            std_dev = np.sqrt(variance)
+        
+        # Calculate Multiple Bands
+        view_history['VWAP'] = vwap
+        
+        # 2.0 SD (Standard)
+        view_history['VWAP_Upper'] = vwap + (std_dev * 2.0)
+        view_history['VWAP_Lower'] = vwap - (std_dev * 2.0)
+        
+        # 1.0 SD (Trend Strength)
+        view_history['VWAP_Upper_1'] = vwap + (std_dev * 1.0)
+        view_history['VWAP_Lower_1'] = vwap - (std_dev * 1.0)
+        
+        # 2.5 SD (Extreme Reversal)
+        view_history['VWAP_Upper_2.5'] = vwap + (std_dev * 2.5)
+        view_history['VWAP_Lower_2.5'] = vwap - (std_dev * 2.5)
 
     # 7. 計算預設縮放範圍 (Auto-Range)
     if len(tick_x_axis) > 0:
