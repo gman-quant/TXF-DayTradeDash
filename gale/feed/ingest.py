@@ -256,6 +256,25 @@ class IngestServer:
                     break
                     
             # End of loop
+            
+            # [Final Flush] Ensure all pending data is written
+            if pending_ticks:
+                logger.info(f"🧹 Final Flush: Writing {len(pending_ticks)} pending ticks...")
+                ready_ticks = []
+                ready_lob_metrics = []
+                
+                while pending_ticks:
+                    t = pending_ticks.popleft()
+                    # Calculate metrics with current state (Force)
+                    obi, ofi, lag = self.lob_engine.get_metrics(t.timestamp_ms)
+                    
+                    ready_ticks.append(t)
+                    ready_lob_metrics.append((obi, ofi, lag))
+                    
+                self.ring_buffer.write_batch(ready_ticks, lob_data=ready_lob_metrics)
+                processed_count += len(ready_ticks)
+                logger.info(f"✅ Final Flush Written. Total Processed: {processed_count}")
+
             logger.info("✅ Ingestion Completed.")
             self.consumer.close()
             
