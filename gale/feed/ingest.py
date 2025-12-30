@@ -110,6 +110,8 @@ class IngestServer:
         pending_ticks = deque()  # Buffer for ticks waiting for quotes
         MAX_TICK_WAIT_MS = 50 # Max wait time for a tick before forcing write (Lag Safety)
         
+        # [Drain Mode] Variables
+        tick_ingestion_complete = False
         ingestion_complete = False
 
         # Pre-calc end timestamp if in history mode
@@ -127,10 +129,6 @@ class IngestServer:
 
                 # --- 1. Process Messages (Sequencer) ---
                 for msg in batch_msgs:
-                    # Check completion
-                    # (Simplified: check if ANY message is past end time? Or just Ticks?)
-                    # Usually checking Ticks is enough for termination.
-                    
                     topic = msg.topic()
                     raw_bytes = msg.value()
                     
@@ -140,51 +138,45 @@ class IngestServer:
                             q = BidAsk()
                             q.ParseFromString(raw_bytes)
                             
-                            # [Quote Sanitization] 報價淨化機制
-                            # 目的：阻擋來自未來的異常報價 (例如 09:12 出現 21:30 的 Quote)。
-                            # 效益：確保 LOBEngine.max_seen_ts (內部時鐘) 永遠不被髒資料汙染，維持高可信度。
+                            # [Quote Sanitization] 
                             if end_ts_ms and q.timestamp_ms > end_ts_ms:
+                                # In Drain Mode, if we run out of valid quotes (past end time), we stop.
+                                if tick_ingestion_complete:
+                                     logger.info(f"🛑 Quote stream reached session end ({q.timestamp_ms}). Drain complete.")
+                                     ingestion_complete = True # Real exit
+                                     break
                                 continue 
 
                             self.lob_engine.update(q)
                             quote_count += 1
                             
                         elif topic == self.args.topic: # 'txf-tick'
+                            # [Drain Mode] Ignore new ticks if we are draining
+                            if tick_ingestion_complete:
+                                continue
+
                             # --- Tick Handling ---
                             t = Tick()
                             t.ParseFromString(raw_bytes)
                             
-                            # [Outlier Protection] 異常停機防護機制
-                            # 概念：採用「觸發 (Trigger) + 准許 (Permission)」雙重驗證。
-                            # 1. 觸發：收到「超時 Tick」(t.timestamp > 收盤時間)，即視為潛在的結束信號。
-                            # 2. 准許：檢查「系統內部時鐘」是否已進入收盤警戒區 (Permission Window)。
+                            # [Outlier Protection] and [Session End Trigger]
                             if end_ts_ms and t.timestamp_ms > end_ts_ms:
-                                
-                                # [Clock Source] 報價驅動時鐘 (Quote-Driven Clock)
-                                # 策略：使用 max_seen_ts 作為基準。因為 Quotes 遠比 Ticks 密集，即使尾盤 Tick 無量斷流，
-                                #       Quotes 依然會持續推動時間，避免 Deadlock。
                                 current_stream_time = self.lob_engine.max_seen_ts
-                                if current_stream_time == 0:
-                                     current_stream_time = t.timestamp_ms 
+                                if current_stream_time == 0: current_stream_time = t.timestamp_ms 
                                 
                                 time_remaining = end_ts_ms - current_stream_time
                                 
-                                # [Threshold] 准許門檻：30分鐘 (1,800,000ms)
-                                # 邏輯：
-                                # A. 結算日相容性：結算日 13:30 收盤，距離 13:45 僅 15分鐘，符合 < 30分鐘 (PASS)。
-                                # B. 尾盤無量保護：即使最後 10 分鐘沒 Tick，時鐘 (Quote) 依然會走到 13:35，符合 < 30分鐘 (PASS)。
-                                # C. 早盤誤判防禦：09:xx 的 Outlier 距離收盤 > 4小時，不符合 < 30分鐘 (REJECT)。
                                 if time_remaining < 1800000: 
                                     logger.info(f"🛑 Reached session end time via Tick: {end_offset}. (StreamTS: {current_stream_time})")
-                                    ingestion_complete = True
-                                    break
+                                    logger.info("🌊 Entering Drain Mode: Waiting for quotes to flush pending ticks...")
+                                    tick_ingestion_complete = True
+                                    # DO NOT BREAK LOOP HERE. Continue to consume quotes.
+                                    continue 
                                 else:
-                                    # [Reject] 拒絕異常信號
-                                    # 雖然收到結束信號 (Trigger)，但內部時鐘顯示時間未到 (Permission Denied)。
+                                    # Outlier
                                     if processed_count % 1000 == 0:
-                                         logger.warning(f"⚠️ Ignored Outlier Tick at {t.timestamp_ms} (Stream: {current_stream_time}). (Sampled Log)")
-                                    
-                                    continue # 丟棄此異常 Tick
+                                         logger.warning(f"⚠️ Ignored Outlier Tick at {t.timestamp_ms} (Stream: {current_stream_time}).")
+                                    continue
                             
                             # Add to pending buffer
                             pending_ticks.append(t)
@@ -192,8 +184,14 @@ class IngestServer:
                     except Exception as e:
                         logger.error(f"Processing Error: {e}")
                 
-                # [Revert] Removed outer loop break to allow future quotes to flush pending ticks
-                # (This will cause log spam but ensures data completeness)
+                # Check for Drain Completion
+                # If we are in drain mode and pending buffer is empty, we are done.
+                if tick_ingestion_complete and not pending_ticks:
+                    logger.info("✅ Drain Mode Empty: All ticks processed.")
+                    ingestion_complete = True
+                
+                if ingestion_complete:
+                    break
 
                 # --- 2. Flushing Logic (Micro-Sync Optimized) ---
                 # Check pending ticks against LOB Watermark

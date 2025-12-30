@@ -360,7 +360,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             <html>
             <head>
                 <meta charset="utf-8">
-                <title>TXF {ts_str}</title>
+                <title>TXF {date_str}{suffix}</title>
                 <style>
                     body {{ 
                         background-color: #111; 
@@ -384,7 +384,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                 </style>
             </head>
             <body>
-                <h2>🚀 TXF Gale Snapshot</h2>
+                <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {'🌙' if suffix else '☀️'}</h2>
                 {header_html}
                 {plot_html}
             </body>
