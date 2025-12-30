@@ -93,7 +93,7 @@ python -m bin.run_supervisor
 指定日期進行歷史數據回放。
 
 ```bash
-python -m bin.run_supervisor --mode history --date 2025-12-24 --session night
+python -m bin.run_supervisor --mode history --date 2025-12-29 --session day
 ```
 
 ### 3. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]

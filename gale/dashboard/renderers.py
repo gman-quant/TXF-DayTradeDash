@@ -26,7 +26,16 @@ def add_main_price_chart(fig, data, row=1, col=1):
             low=data['candles']['low'], close=data['candles']['close'],
             name=f'{current_tf} OHLC',
             increasing_line_color=UI_COLOR['TEXT_MAIN'], decreasing_line_color=UI_COLOR['TEXT_MAIN'],
-            increasing_line_width=1, decreasing_line_width=1
+            increasing_line_width=1, decreasing_line_width=1,
+
+            # 簡潔版 Tooltip
+            hovertemplate=(
+                '<b>%{x|%H:%M:%S}</b><br>' +
+                'H: %{high}<br>C: %{close}<br>O: %{open}<br>L: %{low}<br>' +
+                'V: %{text}' +
+                '<extra></extra>' 
+            ),
+            text=[f'{v:,}' for v in data['candles']['volume']] # 預先格式化成交量字串
         ), row=row, col=col)
     else:
         fig.add_trace(go.Candlestick(
@@ -40,7 +49,7 @@ def add_main_price_chart(fig, data, row=1, col=1):
             # 簡潔版 Tooltip
             hovertemplate=(
                 '<b>%{x|%H:%M:%S}</b><br>' +
-                'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
+                'H: %{high}<br>C: %{close}<br>O: %{open}<br>L: %{low}<br>' +
                 'V: %{text}' +
                 '<extra></extra>' 
             ),
@@ -58,6 +67,7 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     trace_kwargs = dict(
         x=data['tick_x'], y=y_data, mode='lines', name=ind_id,
         line=dict(color=ind_config['color'], width=1, dash=ind_config.get('style', 'solid')),
+        hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
     )
     
     # 用於 Legend Group 切換 (e.g. 點擊 VWAP 可同時切換 Upper/Lower)
@@ -183,7 +193,8 @@ class OscillatorRenderers:
         fig.add_trace(go.Scattergl(
             x=x_data, y=y_data, mode='lines', name=ind_id,
             line=dict(color=config['color'], width=1.0), 
-            legendgroup=group_name, showlegend=True, legendrank=4
+            legendgroup=group_name, showlegend=True, legendrank=4,
+            hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=True) # 使用右軸
         
         # 填充區域 (Zero Line area fill)
@@ -200,7 +211,8 @@ class OscillatorRenderers:
         bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (< 5)",
-            marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=1
+            marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=1,
+            hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False) # 使用左軸
 
     @staticmethod
@@ -211,7 +223,8 @@ class OscillatorRenderers:
         fig.add_hline(y=0, line_width=1, line_color="#555", row=row, col=col)
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (>= 5)",
-            marker_color=cols, marker_line_width=0, opacity=0.6, legendrank=2
+            marker_color=cols, marker_line_width=0, opacity=0.6, legendrank=2,
+            hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False)
 
     @staticmethod
@@ -221,7 +234,8 @@ class OscillatorRenderers:
         cols = np.where(y_data >= 0, '#FB00FF', '#00FFFF')
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config['id']} (>= 15)",
-            marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3
+            marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3,
+            hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False)
 
     @staticmethod
@@ -238,7 +252,8 @@ class OscillatorRenderers:
             mode='lines', 
             name='CumOBI',
             line=dict(width=1.0, color='cyan'),
-            legendgroup=group_name, showlegend=True
+            legendgroup=group_name, showlegend=True,
+            hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False)
 
         # Fill Area
@@ -274,7 +289,8 @@ class OscillatorRenderers:
             mode='lines',
             name='CumOFI',
             line=dict(color='gold', width=1.0),
-            legendgroup=group_name, showlegend=True
+            legendgroup=group_name, showlegend=True,
+            hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=True) 
 
         # Fill Area (Zero Line)

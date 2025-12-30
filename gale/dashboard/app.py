@@ -15,6 +15,7 @@ from gale.dashboard.controller import (
 )
 from gale.dashboard.chart import create_blank_figure
 from gale.dashboard.data_model import get_last_value
+from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
 
 # --- Configuration ---
 try:
@@ -213,32 +214,43 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             raise PreventUpdate
             
         import plotly.graph_objects as go
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
         # 1. 重建 Figure 物件
         fig = go.Figure(fig_data)
         
         # 2. 生成檔名 (Session Logic)
-        from datetime import timedelta
         now = datetime.now()
         ts_str = now.strftime('%Y-%m-%d %H:%M:%S') # [Fix] Define ts_str for HTML template
         
-        # 判斷盤別 (Day vs Night)
-        # Night Session: 15:00 ~ 05:00 (of next day)
+        # ┌──────────────────────────────────────────────────────────────────┐
+        # │ 檔案命名邏輯 (Filename Logic) - 依據交易日 (Trade Date)              │
+        # │ ---------------------------------------------------------------- │
+        # │ 1. Day Session (08:45~13:45) -> T日 (e.g., "2023-10-01")         │
+        # │ 2. Night Session (15:00~05:00) -> T+1日 (e.g., "2023-10-02-n")   │
+        # │    (夜盤交易歸屬於「次一交易日」)                                     │
+        # └──────────────────────────────────────────────────────────────────┘
+        
+        # [Mode A] History Replay
         if args and args.mode == 'history' and args.date:
-            # [History Mode] Use Replay Date/Session
             date_str = args.date
             suffix = '-n' if args.session == 'night' else ''
-        elif now.hour < 8:
-            # 凌晨時段屬於前一天的夜盤
-            date_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
-            suffix = '-n'
-        elif now.hour >= 15:
-            # 下午 3 點後屬於當天的夜盤
+
+        # [Mode B] Live / Forward Test
+        # Case 1: 凌晨 (00:00 ~ 08:45) -> 仍屬於夜盤 (Trade Date = Today)
+        # 例如: 10/02 04:00 -> 屬於 10/02 的夜盤 (接續 10/01 15:00 開盤的場次)
+        elif now.time() < DAY_SESSION_START:
             date_str = now.strftime('%Y-%m-%d')
             suffix = '-n'
+            
+        # Case 2: 下午/晚上 (15:00 ~ 23:59) -> 屬於「隔日」夜盤 (Trade Date = Tomorrow)
+        # 例如: 10/01 20:00 -> 歸屬為 10/02 的夜盤
+        elif now.time() >= NIGHT_SESSION_START:
+            date_str = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+            suffix = '-n'
+            
+        # Case 3: 日盤 (08:45 ~ 13:45) -> 屬於今日日盤
         else:
-            # 日盤 (08:45 ~ 13:45)
             date_str = now.strftime('%Y-%m-%d')
             suffix = ''
             
@@ -348,7 +360,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             <html>
             <head>
                 <meta charset="utf-8">
-                <title>Gale Snapshot {ts_str}</title>
+                <title>TXF {ts_str}</title>
                 <style>
                     body {{ 
                         background-color: #111; 
