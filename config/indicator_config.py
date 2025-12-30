@@ -3,6 +3,7 @@
 # 定義指標類型常數
 TYPE_OVERLAY = 'overlay'       # 疊加在主圖 (如 SMA, VWAP)
 TYPE_OSCILLATOR = 'oscillator' # 獨立副圖 (如 Momentum, RSI, Volume)
+TYPE_VIRTUAL = 'virtual'       # 虛擬指標 (如 VWAP Bands)
 
 # 指標配置清單
 # 系統會自動讀取此清單，並去 core/numba_engine.py 找對應的函數執行
@@ -39,6 +40,34 @@ INDICATORS_SETUP = [
         'color': "#008692",           
         'style': 'solid',
         'legendgroup': 'VWAP_Group' # Group with Bands
+    },
+    # VWAP Bands (Virtual Indicators - Frontend Only)
+    {
+        'id': 'VWAP_Band_1.0',
+        'type': TYPE_VIRTUAL,
+        'subtype': 'vwap_band',
+        'sd': 1.0,
+        'color': '#F4D03F',
+        'width': 1,
+        'name': 'VWAP ±1.0σ'
+    },
+    {
+        'id': 'VWAP_Band_2.0',
+        'type': TYPE_VIRTUAL,
+        'subtype': 'vwap_band',
+        'sd': 2.0,
+        'color': '#28B463',
+        'width': 1,
+        'name': 'VWAP ±2.0σ'
+    },
+    {
+        'id': 'VWAP_Band_2.5',
+        'type': TYPE_VIRTUAL,
+        'subtype': 'vwap_band',
+        'sd': 2.5,
+        'color': '#E74C3C',
+        'width': 2,
+        'name': 'VWAP ±2.5σ'
     },
     # 當盤最低價
     {

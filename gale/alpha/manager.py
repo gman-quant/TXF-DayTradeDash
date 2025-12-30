@@ -2,7 +2,7 @@
 
 import numpy as np
 import gale.alpha.numba_lib as engine
-from config.indicator_config import INDICATORS_SETUP
+from config.indicator_config import INDICATORS_SETUP, TYPE_VIRTUAL
 from config.settings import TIMEFRAMES
 from gale.alpha.profile import VolumeProfileEngine
 from gale.alpha.microstructure import MicrostructureEngine
@@ -90,6 +90,11 @@ class IndicatorManager:
         
         for ind in INDICATORS_SETUP:
             ind_id = ind['id']
+            
+            # [virtual] Skip frontend-only indicators
+            if ind.get('type') == TYPE_VIRTUAL:
+                continue
+                
             # 為每個指標分配存儲空間
             self.history[ind_id] = np.zeros(buffer_capacity, dtype=np.float64)
             

@@ -14,6 +14,7 @@ gale.dashboard.data_model.py
 import bisect
 import numpy as np
 from config.settings import TIMEFRAMES
+from config.indicator_config import INDICATORS_SETUP
 
 VP_BIN_SIZE = 1 # Volume Profile 價格分箱大小 (點)
 
@@ -150,20 +151,13 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
             variance[variance < 0] = 0.0
             std_dev = np.sqrt(variance)
         
-        # Calculate Multiple Bands
-        view_history['VWAP'] = vwap
-        
-        # 2.0 SD (Standard)
-        view_history['VWAP_Upper'] = vwap + (std_dev * 2.0)
-        view_history['VWAP_Lower'] = vwap - (std_dev * 2.0)
-        
-        # 1.0 SD (Trend Strength)
-        view_history['VWAP_Upper_1'] = vwap + (std_dev * 1.0)
-        view_history['VWAP_Lower_1'] = vwap - (std_dev * 1.0)
-        
-        # 2.5 SD (Extreme Reversal)
-        view_history['VWAP_Upper_2.5'] = vwap + (std_dev * 2.5)
-        view_history['VWAP_Lower_2.5'] = vwap - (std_dev * 2.5)
+        # Dynamic VWAP Bands Calculation (from Config)
+        for band in INDICATORS_SETUP:
+            if band.get('subtype') == 'vwap_band':
+                sd = band['sd']
+                # Keys: VWAP_Upper_2.0, VWAP_Lower_2.0
+                view_history[f'VWAP_Upper_{sd}'] = vwap + (std_dev * sd)
+                view_history[f'VWAP_Lower_{sd}'] = vwap - (std_dev * sd)
 
     # 7. 計算預設縮放範圍 (Auto-Range)
     if len(tick_x_axis) > 0:

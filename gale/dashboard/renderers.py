@@ -64,8 +64,10 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     # 根據 State 計算的 Step 進行降頻繪製
     y_data = data['history'][ind_id][data['start_idx']::data['step']]
     
+    display_name = ind_config.get('name', ind_id)
+    
     trace_kwargs = dict(
-        x=data['tick_x'], y=y_data, mode='lines', name=ind_id,
+        x=data['tick_x'], y=y_data, mode='lines', name=display_name,
         line=dict(color=ind_config['color'], width=1, dash=ind_config.get('style', 'solid')),
         hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
     )

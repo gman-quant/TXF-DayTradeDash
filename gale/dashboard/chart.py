@@ -13,7 +13,11 @@ import gale.dashboard.renderers as renderers
 
 # Helper
 from config.ui_theme import UI_COLOR
-from config.indicator_config import INDICATORS_SETUP, TYPE_OVERLAY, TYPE_OSCILLATOR
+from config.indicator_config import (
+    INDICATORS_SETUP, 
+    TYPE_OVERLAY, 
+    TYPE_OSCILLATOR
+)
 
 VP_LEGEND_GROUP = "Volume_Profile"
 VP_BIN_SIZE = 1
@@ -77,43 +81,35 @@ def build_combined_figure(data):
     # 預設隱藏 (Legend Only) 的指標列表
     DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60', 'Max_250', 'Min_250']
     
-    # [特殊處理] VWAP Bands (通道)
-    if 'VWAP_Upper' in data['history']:
-        # Upper Band 2.0 (Standard) - Green
-        renderers.add_overlay_indicator(fig, data, {
-            'id': 'VWAP_Upper', 'color': '#28B463', 'style': 'dash',
-            'legendgroup': 'VWAP_Group'
-        }, row=1, col=1)
-        # Lower Band 2.0 (Standard) - Green
-        renderers.add_overlay_indicator(fig, data, {
-            'id': 'VWAP_Lower', 'color': '#28B463', 'style': 'dash',
-            'legendgroup': 'VWAP_Group'
-        }, row=1, col=1)
-
-    # [NEW] Optional Bands (1.0 & 2.5) with New Colors
-    # 1.0 SD (Trend Life Line) - Gold
-    if 'VWAP_Upper_1' in data['history']:
-        renderers.add_overlay_indicator(fig, data, {
-            'id': 'VWAP_Upper_1', 'color': '#F4D03F', 'style': 'dash', 'width': 1,
-            'legendgroup': 'VWAP_Group_1'
-        }, row=1, col=1)
-        
-        renderers.add_overlay_indicator(fig, data, {
-            'id': 'VWAP_Lower_1', 'color': '#F4D03F', 'style': 'dash', 'width': 1,
-            'legendgroup': 'VWAP_Group_1'
-        }, row=1, col=1)
-
-    # 2.5 SD (Extreme Reversal) - Red
-    if 'VWAP_Upper_2.5' in data['history']:
-        renderers.add_overlay_indicator(fig, data, {
-            'id': 'VWAP_Upper_2.5', 'color': '#E74C3C', 'style': 'dash', 'width': 2, # Thicker for warning
-            'legendgroup': 'VWAP_Group_2.5'
-        }, row=1, col=1)
-        
-        renderers.add_overlay_indicator(fig, data, {
-            'id': 'VWAP_Lower_2.5', 'color': '#E74C3C', 'style': 'dash', 'width': 2, # Thicker for warning
-            'legendgroup': 'VWAP_Group_2.5'
-        }, row=1, col=1)
+    
+    # [特殊處理] VWAP Bands (通道 - Dynamic)
+    for band in INDICATORS_SETUP:
+        if band.get('subtype') == 'vwap_band':
+            sd = band['sd']
+            key_upper = f'VWAP_Upper_{sd}'
+            key_lower = f'VWAP_Lower_{sd}'
+            
+            # Upper
+            if key_upper in data['history']:
+                renderers.add_overlay_indicator(fig, data, {
+                    'id': key_upper, 
+                    'name': band['name'].replace('±', '+'),  # Display: VWAP +1.0σ
+                    'color': band['color'], 
+                    'style': 'dash', 
+                    'width': band.get('width', 1),
+                    'legendgroup': f'VWAP_Group_{sd}'
+                }, row=1, col=1)
+                
+            # Lower
+            if key_lower in data['history']:
+                renderers.add_overlay_indicator(fig, data, {
+                    'id': key_lower, 
+                    'name': band['name'].replace('±', '-'), # Display: VWAP -1.0σ
+                    'color': band['color'], 
+                    'style': 'dash', 
+                    'width': band.get('width', 1),
+                    'legendgroup': f'VWAP_Group_{sd}'
+                }, row=1, col=1)
 
     # 動態渲染 Config 中的所有 Overlay 指標
     for ind in INDICATORS_SETUP:
