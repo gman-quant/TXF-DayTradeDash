@@ -241,59 +241,70 @@ class CoreSupervisor:
         server.run()
 
     def run(self):
+
         try:
             # 1. Start Ingestion Subprocess
             self.start_ingestion()
             
-            # [Health Check] Wait and see if Feed crashes immediately
-            time.sleep(2)
-            ret = self.ingest_process.poll()
-            if ret is not None:
-                if ret == 0:
-                    logger.info("✅ Feed Process finished successfully.")
-                    sys.exit(0)
-                else:
-                    logger.error(f"❌ Feed Process Crashed! Return Code: {ret}")
-                    sys.exit(1)
-            
-            # 2. Start Dashboard Subprocess (New!)
+            # 2. Start Dashboard Subprocess
             self.start_dashboard()
-            time.sleep(1)
-
-            # 3. Start Strategy (in-process, blocks here)
-            # [User Request] Temporarily disable strategy to run Feed/Dashboard only
-            # self.start_strategy()
+            
+            # 3. Strategy (Optional/Disabled)
             logger.info("⚠️ Strategy Engine is disabled by user request.")
             
-            # Since strategy is disabled, we must simulate the 'Wait' behavior for both History and Live Mode
-            # Otherwise the script hits 'finally' and kills everything immediately.
             logger.info("🎬 Engine Started. Dashboard is active.")
             logger.info("👉 Press Ctrl+C to stop and close Dashboard.")
+
+            # --- 建立穩健的監控迴圈 ---
+            ingest_finished = False
+
             while True:
                 time.sleep(1)
+
+                # A. 監控 Ingest (資料攝取) 進程
+                # 僅檢查是否異常崩潰 (非零退出)。若正常結束 (0)，則視為回放完成，保持 Dashboard 開啟。
+                if self.ingest_process and not ingest_finished:
+                    ret = self.ingest_process.poll()
+                    if ret is not None:
+                        if ret == 0:
+                            logger.info("✅ Feed Process (資料源) 已正常結束。Dashboard 保持開啟。")
+                            ingest_finished = True
+                        else:
+                            logger.error(f"❌ Feed Process 異常崩潰！Return Code: {ret}")
+                            sys.exit(1)
+
+                # B. 監控 Dashboard (儀表板) 進程
+                if self.dash_process:
+                    d_ret = self.dash_process.poll()
+                    if d_ret is not None:
+                        logger.error(f"❌ Dashboard Process 異常崩潰！Return Code: {d_ret}")
+                        sys.exit(1)
             
         except KeyboardInterrupt:
-            logger.info("Supervisor received Ctrl+C.")
+            logger.info("Supervisor 收到 Ctrl+C (KeyboardInterrupt)。")
         finally:
             self.cleanup()
 
     def cleanup(self):
-        logger.info("Terminating subprocesses...")
-        if self.ingest_process and self.ingest_process.poll() is None:
-            self.ingest_process.terminate()
-            try:
-                self.ingest_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.ingest_process.kill()
+        logger.info("正在終止所有子進程...")
         
-        if self.dash_process and self.dash_process.poll() is None:
-            self.dash_process.terminate()
-            try:
-                self.dash_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.dash_process.kill()
+        def kill_proc(proc, name):
+            if proc and proc.poll() is None:
+                logger.info(f"正在停止 {name}...")
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        logger.warning(f"{name} 無法正常停止，強制擊殺 (Kill)...")
+                        proc.kill()
+                except Exception as e:
+                    logger.error(f"停止 {name} 時發生錯誤: {e}")
+
+        kill_proc(self.ingest_process, "Ingest Server")
+        kill_proc(self.dash_process, "Dashboard Server")
                 
-        logger.info("All processes terminated.")
+        logger.info("所有進程已終止。")
 
 def parse_cli_args():
     """
@@ -345,4 +356,19 @@ def parse_cli_args():
 if __name__ == "__main__":
     args = parse_cli_args()
     supervisor = CoreSupervisor(args)
+    
+    def handle_signal(signum, frame):
+        if signum == signal.SIGINT:
+            # [正常退場] 用戶手動按下 Ctrl+C
+            logger.info("收到 SIGINT (Ctrl+C)，執行正常關閉流程...")
+            sys.exit(0)
+        elif signum == signal.SIGTERM:
+            # [特殊處理] 忽略 AutoRun 於非交易時段發出的清理信號
+            # 這是為了讓用戶可以在週末/夜間進行手動回測而不被強制關閉
+            logger.warning("收到 SIGTERM (來自 AutoRun 管家)，忽略信號以保持 Dashboard 開啟 (手動回測模式)。")
+            return
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+    
     supervisor.run()
