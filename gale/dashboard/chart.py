@@ -16,7 +16,9 @@ from config.ui_theme import UI_COLOR
 from config.indicator_config import (
     INDICATORS_SETUP, 
     TYPE_OVERLAY, 
-    TYPE_OSCILLATOR
+    TYPE_OSCILLATOR,
+    TYPE_VIRTUAL,
+    DEFAULT_OFF_LEGENDS
 )
 
 VP_LEGEND_GROUP = "Volume_Profile"
@@ -75,17 +77,19 @@ def build_combined_figure(data):
     # ---------------------------------------------------------
     
     # 1. Main Chart (K 線圖)
+    # 1. Main Chart (K 線圖)
     renderers.add_main_price_chart(fig, data, row=1, col=1)
 
     # 2. Overlays (主圖指標)
-    # 預設隱藏 (Legend Only) 的指標列表
-    DEFAULT_OFF_LEGENDS = ['SMA_3min', 'SMA_60', 'Max_250', 'Min_250']
     
-    
-    # [特殊處理] VWAP Bands (通道 - Dynamic)
-    for band in INDICATORS_SETUP:
-        if band.get('subtype') == 'vwap_band':
-            sd = band['sd']
+    # 2. Overlays (主圖指標)
+    for ind in INDICATORS_SETUP:
+        # Check visibility
+        should_hide = ind['id'] in DEFAULT_OFF_LEGENDS
+        
+        # Case A: VWAP Bands (Global - Split into Upper/Lower)
+        if ind.get('subtype') == 'vwap_band':
+            sd = ind['sd']
             key_upper = f'VWAP_Upper_{sd}'
             key_lower = f'VWAP_Lower_{sd}'
             
@@ -93,37 +97,39 @@ def build_combined_figure(data):
             if key_upper in data['history']:
                 renderers.add_overlay_indicator(fig, data, {
                     'id': key_upper, 
-                    'name': band['name'].replace('±', '+'),  # Display: VWAP +1.0σ
-                    'color': band['color'], 
+                    'name': ind['name'].replace('±', '+'),
+                    'color': ind['color'], 
                     'style': 'dash', 
-                    'width': band.get('width', 1),
-                    'legendgroup': f'VWAP_Group_{sd}'
+                    'width': ind.get('width', 1),
+                    'legendgroup': 'Global_Upper',
+                    'legendrank': 150 + int(sd * 4)
                 }, row=1, col=1)
-                
+                if should_hide: fig.data[-1].visible = 'legendonly'
+
             # Lower
             if key_lower in data['history']:
                 renderers.add_overlay_indicator(fig, data, {
                     'id': key_lower, 
-                    'name': band['name'].replace('±', '-'), # Display: VWAP -1.0σ
-                    'color': band['color'], 
+                    'name': ind['name'].replace('±', '-'),
+                    'color': ind['color'], 
                     'style': 'dash', 
-                    'width': band.get('width', 1),
-                    'legendgroup': f'VWAP_Group_{sd}'
+                    'width': ind.get('width', 1),
+                    'legendgroup': 'Global_Lower',
+                    'legendrank': 160 + int(sd * 4)
                 }, row=1, col=1)
+                if should_hide: fig.data[-1].visible = 'legendonly'
 
-    # 動態渲染 Config 中的所有 Overlay 指標
-    for ind in INDICATORS_SETUP:
-        if ind.get('type') == TYPE_OVERLAY and ind['id'] in data['history']:
-            # 記錄當前 Trace 數量，以便判斷是否成功新增
-            n_traces_before = len(fig.data)
-            renderers.add_overlay_indicator(fig, data, ind, row=1, col=1)
-            
-            # 若成功新增，設定可見性
-            if len(fig.data) > n_traces_before:
-                if ind['id'] in DEFAULT_OFF_LEGENDS:
-                    fig.data[-1].visible = 'legendonly'
-                else:
-                    fig.data[-1].visible = True
+        # Case B: Standard Overlay / Virtual (Single Trace)
+        elif ind.get('type') in [TYPE_OVERLAY, TYPE_VIRTUAL]:
+            # [Fix] Ensure we find the ID in history (Standard or Virtual)
+            if ind['id'] in data['history']:
+                n_traces_before = len(fig.data)
+                renderers.add_overlay_indicator(fig, data, ind, row=1, col=1)
+                if len(fig.data) > n_traces_before:
+                    if should_hide: 
+                        fig.data[-1].visible = 'legendonly'
+                    else:
+                        fig.data[-1].visible = True
 
     # ---------------------------------------------------------
     # Row 2: Oscillators (副圖指標)
@@ -158,13 +164,13 @@ def build_combined_figure(data):
         # [Refactor] 數據已在 state.py 完成預先累加 (State Metric)
         # 這裡直接切片顯示即可。
         plot_cum_obi = data['history']['obi'][data['start_idx']::data['step']]
-        renderers.OscillatorRenderers.render_obi(fig, x_data, plot_cum_obi, {}, row=3, col=1)
+        renderers.OscillatorRenderers.render_obi(fig, x_data, plot_cum_obi, {'id': 'CumOBI', 'name': 'COBI', 'color': '#00FFFF'}, row=3, col=1)
 
     # Render OFI (Right Axis)
     if 'ofi' in data['history']:
         # [Refactor] 直接切片
         plot_cum_ofi = data['history']['ofi'][data['start_idx']::data['step']]
-        renderers.OscillatorRenderers.render_ofi(fig, x_data, plot_cum_ofi, {}, row=3, col=1)
+        renderers.OscillatorRenderers.render_ofi(fig, x_data, plot_cum_ofi, {'id': 'CumOFI', 'name': 'COFI', 'color': '#FFD700'}, row=3, col=1)
 
 
     # 4. Volume Profile (Overlay on Row 1)

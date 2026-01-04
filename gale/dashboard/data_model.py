@@ -159,6 +159,69 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
                 view_history[f'VWAP_Upper_{sd}'] = vwap + (std_dev * sd)
                 view_history[f'VWAP_Lower_{sd}'] = vwap - (std_dev * sd)
 
+        
+        # [Fractal VWAP Calculation]
+        # Retrieve Cumulative Arrays from View History
+        # Note: These keys must match what is in IndicatorManager.history
+        
+        # Helper for safe division
+        def safe_vwap(pv_key, vol_key, default_arr):
+            if pv_key in view_history and vol_key in view_history:
+                pv = view_history[pv_key]
+                vol = view_history[vol_key]
+                res = np.zeros_like(pv)
+                valid = vol > 0
+                
+                # If valid, calculate specific VWAP
+                np.divide(pv, vol, out=res, where=valid)
+                
+                # If invalid (no volume in this sub-regime yet), use Default (Parent VWAP)
+                res[~valid] = default_arr[~valid]
+                return res
+            return default_arr # Should not happen if keys exist
+
+        # Level 1
+        vwap_up = safe_vwap('cum_up_pv', 'cum_up_vol', vwap)
+        vwap_down = safe_vwap('cum_dn_pv', 'cum_dn_vol', vwap)
+        
+        view_history['Fractal_U'] = vwap_up
+        view_history['Fractal_L'] = vwap_down
+        
+        # [Regime StdDev Calculation]
+        def safe_regime_bands(vwap_arr, pv_sq_key, vol_key, suffix_name, multipliers):
+            if pv_sq_key in view_history and vol_key in view_history:
+                pv_sq = view_history[pv_sq_key]
+                vol = view_history[vol_key]
+                
+                # Variance = E[X^2] - (E[X])^2
+                mean_sq = np.zeros_like(pv_sq)
+                valid = vol > 0
+                np.divide(pv_sq, vol, out=mean_sq, where=valid)
+                
+                variance = mean_sq - (vwap_arr * vwap_arr)
+                variance[variance < 0] = 0.0
+                std_dev = np.sqrt(variance)
+                
+                # Output Bands
+                for mult in multipliers:
+                    # Upper Regime -> Add Bands (Resistance)
+                    if 'Bull' in suffix_name:
+                         view_history[f'{suffix_name}_Band_{mult}'] = vwap_arr + (std_dev * mult)
+                    # Lower Regime -> Subtract Bands (Support)
+                    else:
+                         view_history[f'{suffix_name}_Band_{mult}'] = vwap_arr - (std_dev * mult)
+
+        # Calculate Regime Bands (Bull/Bear)
+        safe_regime_bands(vwap_up, 'cum_up_pv_sq', 'cum_up_vol', 'Bull', [1.0, 2.0, 2.5])
+        safe_regime_bands(vwap_down, 'cum_dn_pv_sq', 'cum_dn_vol', 'Bear', [1.0, 2.0, 2.5])
+
+
+        
+
+
+
+
+
     # 7. 計算預設縮放範圍 (Auto-Range)
     if len(tick_x_axis) > 0:
         last_visible_ts = timestamps_slice[-1]

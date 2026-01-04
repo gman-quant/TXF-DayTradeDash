@@ -66,6 +66,19 @@ class IndicatorManager:
         self.history['cum_pv'] = np.zeros(buffer_capacity, dtype=np.float64)
         self.history['cum_volume'] = np.zeros(buffer_capacity, dtype=np.int64)
         self.history['cum_pv_sq'] = np.zeros(buffer_capacity, dtype=np.float64)
+
+        # [Fractal VWAP] Level 1 (with PV_SQ for StdDev)
+        self.history['cum_up_pv'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['cum_up_vol'] = np.zeros(buffer_capacity, dtype=np.int64)
+        self.history['cum_up_pv_sq'] = np.zeros(buffer_capacity, dtype=np.float64)
+        
+        self.history['cum_dn_pv'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['cum_dn_vol'] = np.zeros(buffer_capacity, dtype=np.int64)
+        self.history['cum_dn_pv_sq'] = np.zeros(buffer_capacity, dtype=np.float64)
+
+        
+        # [Fractal VWAP] Level 2 Removed (Cleaned up)
+
         
         # 🆕 有效量 (Effective Volume)
         # 用於存儲「重組後」的成交量。
@@ -303,6 +316,64 @@ class IndicatorManager:
                 curr['new_tick'] = True
 
 
+    def _update_fractal_vwap(self, idx, price, volume, prev_idx, is_reset):
+        """
+        [Recursive Fractal VWAP Logic]
+        Simplified: Level 1 Only (Upper vs Lower Regime)
+        """
+        # ----------------------------------------------------
+        # Step A: Get Reference VWAPs (Lagged 1 Tick)
+        # ----------------------------------------------------
+        ref_global = price
+        
+        if not is_reset and self.history['cum_volume'][prev_idx] > 0:
+            ref_global = self.history['cum_pv'][prev_idx] / self.history['cum_volume'][prev_idx]
+
+        # ----------------------------------------------------
+        # Step B: Inherit Previous Accumulators (or Reset)
+        # ----------------------------------------------------
+        if is_reset:
+            curr_up_pv, curr_up_vol, curr_up_pv_sq = 0.0, 0, 0.0
+            curr_dn_pv, curr_dn_vol, curr_dn_pv_sq = 0.0, 0, 0.0
+        else:
+            curr_up_pv = self.history['cum_up_pv'][prev_idx]
+            curr_up_vol = self.history['cum_up_vol'][prev_idx]
+            curr_up_pv_sq = self.history['cum_up_pv_sq'][prev_idx]
+            
+            curr_dn_pv = self.history['cum_dn_pv'][prev_idx]
+            curr_dn_vol = self.history['cum_dn_vol'][prev_idx]
+            curr_dn_pv_sq = self.history['cum_dn_pv_sq'][prev_idx]
+
+        # ----------------------------------------------------
+        # Step C: Classification & Accumulation
+        # ----------------------------------------------------
+        pv = price * volume
+        pv_sq = price * price * volume
+        
+        # Level 1 Classification
+        if price >= ref_global:
+            curr_up_pv += pv
+            curr_up_vol += volume
+            curr_up_pv_sq += pv_sq
+        else:
+            curr_dn_pv += pv
+            curr_dn_vol += volume
+            curr_dn_pv_sq += pv_sq
+            
+        # ----------------------------------------------------
+        # Step D: Write Back
+        # ----------------------------------------------------
+        self.history['cum_up_pv'][idx] = curr_up_pv
+        self.history['cum_up_vol'][idx] = curr_up_vol
+        self.history['cum_up_pv_sq'][idx] = curr_up_pv_sq
+        
+        self.history['cum_dn_pv'][idx] = curr_dn_pv
+        self.history['cum_dn_vol'][idx] = curr_dn_vol
+        self.history['cum_dn_pv_sq'][idx] = curr_dn_pv_sq
+
+
+
+
     def on_tick(self, snapshot_tuple):
         """
         核心事件處理：當收到新 Tick 時被觸發
@@ -360,6 +431,19 @@ class IndicatorManager:
         self.history["cum_pv"][curr_idx]     = float(snapshot_tuple[6][curr_idx])
         self.history["cum_volume"][curr_idx] = int(snapshot_tuple[5][curr_idx])
         self.history["cum_pv_sq"][curr_idx]  = float(snapshot_tuple[16][curr_idx])
+        
+        # [Fractal VWAP Logic]
+        # Detect Reset: If cum_volume stored in SHM is smaller than previous tick's cum_volume, it reset.
+        prev_idx = curr_idx - 1 
+        if prev_idx < 0: prev_idx = self.capacity - 1
+        
+        curr_cum_vol = self.history["cum_volume"][curr_idx]
+        prev_cum_vol = self.history["cum_volume"][prev_idx]
+        
+        is_reset = (curr_cum_vol < prev_cum_vol) or (curr_cum_vol == vol_val)
+        
+        self._update_fractal_vwap(curr_idx, close_val, vol_val, prev_idx, is_reset)
+
         
         # ==========================================
         # 5. 大單重組 (Whale Reconstruction) - Effective Volume Logic

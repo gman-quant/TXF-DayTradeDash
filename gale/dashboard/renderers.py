@@ -35,7 +35,8 @@ def add_main_price_chart(fig, data, row=1, col=1):
                 'V: %{text}' +
                 '<extra></extra>' 
             ),
-            text=[f'{v:,}' for v in data['candles']['volume']] # 預先格式化成交量字串
+            text=[f'{v:,}' for v in data['candles']['volume']], # 預先格式化成交量字串
+            legendrank=100
         ), row=row, col=col)
     else:
         fig.add_trace(go.Candlestick(
@@ -53,7 +54,8 @@ def add_main_price_chart(fig, data, row=1, col=1):
                 'V: %{text}' +
                 '<extra></extra>' 
             ),
-            text=[f'{v:,}' for v in data['candles']['volume']] # 預先格式化成交量字串
+            text=[f'{v:,}' for v in data['candles']['volume']], # 預先格式化成交量字串
+            legendrank=100
         ), row=row, col=col)
 
 def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
@@ -75,6 +77,9 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     # 用於 Legend Group 切換 (e.g. 點擊 VWAP 可同時切換 Upper/Lower)
     if 'legendgroup' in ind_config:
         trace_kwargs['legendgroup'] = ind_config['legendgroup']
+
+    if 'legendrank' in ind_config:
+        trace_kwargs['legendrank'] = ind_config['legendrank']
     
     # 使用 WebGL 加速渲染 (Scattergl)
     fig.add_trace(go.Scattergl(**trace_kwargs), row=row, col=col)
@@ -109,6 +114,8 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
                     name=name,
                     legendgroup=legend_group,
                     showlegend=False, 
+                    visible='legendonly', # Sync with VP Bars
+                    legendrank=190,
                     hoverinfo='name+y' # 只顯示名稱與價格
                 ), row=row, col=col)
     
@@ -137,13 +144,15 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             orientation='h',
             xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
             yaxis='y',
-            name='Buy Vol',
+            name='VP Buy Vol',
             width=bin_size * 0.95,
             marker_color='rgba(0, 230, 118, 0.1)', # 綠色 (加上透明度)
             marker_line_width=0,
             hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
-            showlegend=True
+            visible='legendonly', # Default Hidden
+            showlegend=True,
+            legendrank=190
         ))
         
         # Layer 2: Sell Volume (顯示為 Sell Color, Red)
@@ -153,13 +162,15 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             orientation='h',
             xaxis='x4',     # [Fix] Use X4
             yaxis='y',
-            name='Sell Vol',
+            name='VP Sell Vol',
             width=bin_size * 0.95,
             marker_color='rgba(255, 82, 82, 0.25)', # 紅色
             marker_line_width=0,
             hovertemplate='<b>Sell Vol</b>: %{x:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
-            showlegend=True
+            visible='legendonly', # Default Hidden
+            showlegend=True,
+            legendrank=191
         ))
         
     else:
@@ -176,7 +187,9 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             marker_line_width=0,
             hoverinfo='y+x',
             legendgroup=legend_group,
-            showlegend=True
+            visible='legendonly', # Default Hidden
+            showlegend=True,
+            legendrank=192
         ))
 
 class OscillatorRenderers:
@@ -195,14 +208,14 @@ class OscillatorRenderers:
         fig.add_trace(go.Scattergl(
             x=x_data, y=y_data, mode='lines', name=ind_id,
             line=dict(color=config['color'], width=1.0), 
-            legendgroup=group_name, showlegend=True, legendrank=4,
+            legendgroup=group_name, showlegend=True, legendrank=200,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=True) # 使用右軸
         
         # 填充區域 (Zero Line area fill)
         y_pos = np.maximum(0, y_data)
         y_neg = np.minimum(0, y_data)
-        common_fill = dict(mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 215, 0, 0.05)', hoverinfo='skip', legendgroup=group_name, showlegend=False)
+        common_fill = dict(mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 215, 0, 0.05)', hoverinfo='skip', legendgroup=group_name, showlegend=False, legendrank=200)
         
         fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
         fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
@@ -212,8 +225,8 @@ class OscillatorRenderers:
         """繪製小單淨量 (Small Lot <5口) 柱狀圖"""
         bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
         fig.add_trace(go.Bar(
-            x=x_data, y=y_data, name=f"{config['id']} (< 5)",
-            marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=1,
+            x=x_data, y=y_data, name=f"{config.get('name', config['id'])} (< 5)",
+            marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=210,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False) # 使用左軸
 
@@ -224,8 +237,8 @@ class OscillatorRenderers:
         cols = np.where(y_data >= 0, '#8C5B00', '#006D91')
         fig.add_hline(y=0, line_width=1, line_color="#555", row=row, col=col)
         fig.add_trace(go.Bar(
-            x=x_data, y=y_data, name=f"{config['id']} (>= 5)",
-            marker_color=cols, marker_line_width=0, opacity=0.6, legendrank=2,
+            x=x_data, y=y_data, name=f"{config.get('name', config['id'])} (>= 5)",
+            marker_color=cols, marker_line_width=0, opacity=0.6, legendrank=220,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False)
 
@@ -235,8 +248,8 @@ class OscillatorRenderers:
         # 雙色區分：Buy=洋紅(Neon), Sell=青色(Neon) -> 極度醒目
         cols = np.where(y_data >= 0, '#FB00FF', '#00FFFF')
         fig.add_trace(go.Bar(
-            x=x_data, y=y_data, name=f"{config['id']} (>= 15)",
-            marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=3,
+            x=x_data, y=y_data, name=f"{config.get('name', config['id'])} (>= 15)",
+            marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=230,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False)
 
@@ -252,9 +265,10 @@ class OscillatorRenderers:
         fig.add_trace(go.Scattergl(
             x=x_data, y=y_data, 
             mode='lines', 
-            name='CumOBI',
+            name=config.get('name', 'COBI'),
             line=dict(width=1.0, color='cyan'),
             legendgroup=group_name, showlegend=True,
+            legendrank=250,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False)
 
@@ -269,7 +283,8 @@ class OscillatorRenderers:
             fillcolor='rgba(0, 255, 255, 0.1)', # Cyan tint
             hoverinfo='skip', 
             legendgroup=group_name, 
-            showlegend=False
+            showlegend=False,
+            legendrank=250
         )
         
         fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=False)
@@ -289,9 +304,10 @@ class OscillatorRenderers:
         fig.add_trace(go.Scattergl(
             x=x_data, y=y_data,
             mode='lines',
-            name='CumOFI',
+            name=config.get('name', 'COFI'),
             line=dict(color='gold', width=1.0),
             legendgroup=group_name, showlegend=True,
+            legendrank=240,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=True) 
 
@@ -306,8 +322,10 @@ class OscillatorRenderers:
             fillcolor='rgba(255, 215, 0, 0.1)', # Gold tint
             hoverinfo='skip', 
             legendgroup=group_name, 
-            showlegend=False
+            showlegend=False,
+            legendrank=240
         )
         
         fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
         fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
+
