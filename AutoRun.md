@@ -87,13 +87,16 @@ nano ~/Library/LaunchAgents/com.garrett.txf.gale_dashboard_supervisor.plist
 
                 # --- A. 時段判定 (Decision Matrix) ---
                 IN_WINDOW=0
-                if [[ "$WEEKDAY" -le 5 ]]; then
-                    # 平日 (週一至週五)
+                if [[ "$WEEKDAY" -ge 2 && "$WEEKDAY" -le 5 ]]; then
+                    # 平日 (週二至週五)
                     [[ "$HM" -ge "$T_AM_START" && "$HM" -le "$T_AM_END" ]] && IN_WINDOW=1
                     [[ "$HM" -ge "$T_PM_START" || "$HM" -le "$T_PM_END" ]] && IN_WINDOW=1
                 elif [[ "$WEEKDAY" -eq 6 ]]; then
                     # 週六 (守護週五夜盤至收盤)
                     [[ "$HM" -le "$T_PM_END" ]] && IN_WINDOW=1
+                elif [[ "$WEEKDAY" -eq 1 ]]; then
+                    # 週一：跳過凌晨，從日盤起點開始守護
+                    [[ "$HM" -ge "$T_AM_START" ]] && IN_WINDOW=1
                 fi
 
                 # --- B. 重置判定 (Reset Logic) ---

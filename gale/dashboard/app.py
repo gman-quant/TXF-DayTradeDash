@@ -299,11 +299,6 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                 basis_color = '#FFF000'
                 basis_sign = '+' if basis >= 0 else ''
                 
-                vwap_dev_pct = ((price / vwap) - 1) * 100 if vwap else 0.0
-                if vwap_dev_pct >= 0.2: dev_color = '#2ECC40'
-                elif vwap_dev_pct <= -0.2: dev_color = '#FF4136'
-                else: dev_color = '#BBBBBB'
-                
                 chg_open = price - open_p
                 chg_open_color = '#2ECC40' if chg_open >= 0 else '#FF4136'
                 chg_open_sign = '+' if chg_open >= 0 else ''
@@ -318,38 +313,36 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                     <div style="margin-right: 50px; text-align: center;">
                         <div style="font-size: 48px; font-weight: bold; color: {main_color}; line-height: 1;">{price:,.0f}</div>
                         <div style="font-size: 20px; color: {main_color}; margin-top: 8px;">{sign}{change:.0f} ({sign}{pct:.2f}%)</div>
-                        <div style="font-size: 12px; color: #888; margin-top: 8px;">{ts_str}</div>
                     </div>
                     
                     <!-- [Right] Full Info Grid (4 Columns) -->
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px 40px; text-align: left; font-size: 14px; line-height: 1.6; color: #BBB;">
                         
-                        <!-- Col 1: Boundary -->
+                        <!-- Col 1: Range (波動邊界) -->
                         <div>
-                            <div><span style="color:#BBB;">最高: </span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
-                            <div><span style="color:#BBB;">最低: </span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
-                            <div><span style="color:#BBB;">波幅: </span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">High</span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low</span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range</span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
                         </div>
 
-                        <!-- Col 2: Anchors -->
+                        <!-- Col 2: Context (市場參照) -->
                         <div>
-                            <div><span style="color:#BBB;">昨收: </span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
-                            <div><span style="color:#BBB;">開盤: </span><span style="color:#FFF;">{open_p:,.0f}</span></div>
-                            <div><span style="color:#BBB;">跳空: </span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose</span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot</span><span style="color:#FFF;">{u_price:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
                         </div>
 
-                        <!-- Col 3: Momentum -->
+                        <!-- Col 3: Opening (開盤動態) -->
                         <div>
-                            <div><span style="color:#BBB;">VWAP: </span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
-                            <div><span style="color:#BBB;">開盤漲跌: </span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
-                            <div><span style="color:#BBB;">VWAP Dev: </span><span style="color:{dev_color};">{vwap_dev_pct:.2f}%</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open</span><span style="color:#FFF;">{open_p:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
                         </div>
 
-                        <!-- Col 4: Context -->
+                        <!-- Col 4: Cost & Volume (量價結構) -->
                         <div>
-                            <div><span style="color:#BBB;">現貨價: </span><span style="color:#FFF;">{u_price:,.0f}</span></div>
-                            <div><span style="color:#BBB;">基　差: </span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
-                            <div><span style="color:#BBB;">總　量: </span><span style="color:#FFF;">{vol:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP</span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume</span><span style="color:#FFF;">{vol:,.0f}</span></div>
                         </div>
                     </div>
                 </div>
