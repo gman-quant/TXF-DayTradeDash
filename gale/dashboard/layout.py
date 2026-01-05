@@ -222,32 +222,32 @@ def create_scoreboard_html(last_price, change, change_pct, open_price, high, low
             # Column 1: Range (波動邊界)
             # 針對今日戰場範圍：High, Low, Range
             html.Div(children=[
-                html.Div([html.Span("High", style=LABEL_STYLE), html.Span(f"{high:,.0f}", style={'color': UI_COLOR['UP'], 'fontWeight': 'bold'})], style=ROW_STYLE),
-                html.Div([html.Span("Low", style=LABEL_STYLE), html.Span(f"{low:,.0f}", style={'color': UI_COLOR['DOWN'], 'fontWeight': 'bold'})], style=ROW_STYLE),
-                html.Div([html.Span("Range", style=LABEL_STYLE), html.Span(f"{day_range:.0f}", style={'color': UI_COLOR['HIGHLIGHT']})], style=ROW_STYLE),
+                html.Div([html.Span("High:", style=LABEL_STYLE), html.Span(f"{high:,.0f}", style={'color': UI_COLOR['UP'], 'fontWeight': 'bold'})], style=ROW_STYLE),
+                html.Div([html.Span("Low:", style=LABEL_STYLE), html.Span(f"{low:,.0f}", style={'color': UI_COLOR['DOWN'], 'fontWeight': 'bold'})], style=ROW_STYLE),
+                html.Div([html.Span("Range:", style=LABEL_STYLE), html.Span(f"{day_range:.0f}", style={'color': UI_COLOR['HIGHLIGHT']})], style=ROW_STYLE),
             ]),
             
             # Column 2: Context (市場參照)
             # 針對外部參考：PrevClose, Spot, Basis
             html.Div(children=[
-                html.Div([html.Span("PrevClose", style=LABEL_STYLE), html.Span(f"{prev_close:,.0f}", style={'color': UI_COLOR['TEXT_SUB']})], style=ROW_STYLE),
-                html.Div([html.Span("Spot", style=LABEL_STYLE), html.Span(f"{underlying_price:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
-                html.Div([html.Span("Basis", style=LABEL_STYLE), html.Span(f"{basis_sign}{basis:.2f}", style={'color': basis_color, 'fontWeight': 'bold'})], style=ROW_STYLE),
+                html.Div([html.Span("PrevClose:", style=LABEL_STYLE), html.Span(f"{prev_close:,.0f}", style={'color': UI_COLOR['TEXT_SUB']})], style=ROW_STYLE),
+                html.Div([html.Span("Spot:", style=LABEL_STYLE), html.Span(f"{underlying_price:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
+                html.Div([html.Span("Basis:", style=LABEL_STYLE), html.Span(f"{basis_sign}{basis:.2f}", style={'color': basis_color, 'fontWeight': 'bold'})], style=ROW_STYLE),
             ]),
             
             # Column 3: Opening (開盤動態)
             # 針對開局表現：Open, OpenGap, OpenDelta
             html.Div(children=[
-                html.Div([html.Span("Open", style=LABEL_STYLE), html.Span(f"{open_price:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
-                html.Div([html.Span("OpenGap", style=LABEL_STYLE), html.Span(f"{gap_sign}{gap:.0f}", style={'color': gap_color})], style=ROW_STYLE),
-                html.Div([html.Span("OpenDelta", style=LABEL_STYLE), html.Span(f"{change_open_sign}{change_from_open:.0f}", style={'color': change_open_color})], style=ROW_STYLE),
+                html.Div([html.Span("Open:", style=LABEL_STYLE), html.Span(f"{open_price:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
+                html.Div([html.Span("OpenGap:", style=LABEL_STYLE), html.Span(f"{gap_sign}{gap:.0f}", style={'color': gap_color})], style=ROW_STYLE),
+                html.Div([html.Span("OpenDelta:", style=LABEL_STYLE), html.Span(f"{change_open_sign}{change_from_open:.0f}", style={'color': change_open_color})], style=ROW_STYLE),
             ]),
             
             # Column 4: Volume & Cost (量價結構)
             # 針對成本與動能：VWAP、Volume
             html.Div(children=[
-                html.Div([html.Span("VWAP", style=LABEL_STYLE), html.Span(f"{vwap:,.0f}", style={'color': UI_COLOR['CYAN']})], style=ROW_STYLE),
-                html.Div([html.Span("Volume", style=LABEL_STYLE), html.Span(f"{vol:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
+                html.Div([html.Span("VWAP:", style=LABEL_STYLE), html.Span(f"{vwap:,.0f}", style={'color': UI_COLOR['CYAN']})], style=ROW_STYLE),
+                html.Div([html.Span("Volume:", style=LABEL_STYLE), html.Span(f"{vol:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
             ]),
         ])
     ])

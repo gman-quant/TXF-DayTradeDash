@@ -320,29 +320,29 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                         
                         <!-- Col 1: Range (波動邊界) -->
                         <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">High</span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low</span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range</span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">High:</span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low:</span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range:</span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
                         </div>
 
                         <!-- Col 2: Context (市場參照) -->
                         <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose</span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot</span><span style="color:#FFF;">{u_price:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot:</span><span style="color:#FFF;">{u_price:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
                         </div>
 
                         <!-- Col 3: Opening (開盤動態) -->
                         <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open</span><span style="color:#FFF;">{open_p:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open:</span><span style="color:#FFF;">{open_p:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
                         </div>
 
                         <!-- Col 4: Cost & Volume (量價結構) -->
                         <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP</span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume</span><span style="color:#FFF;">{vol:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
+                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume:</span><span style="color:#FFF;">{vol:,.0f}</span></div>
                         </div>
                     </div>
                 </div>

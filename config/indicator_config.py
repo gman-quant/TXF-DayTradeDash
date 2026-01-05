@@ -344,27 +344,31 @@ INDICATORS_SETUP = [
 
     # 4. 🌊 Order Flow (OFI)
     # Order Flow Imbalance: Net Aggressor Volume
+    # 4. 🌊 Order Flow (OFI)
+    # Order Flow Imbalance (Cumulative from Shared Memory)
     {
         'id': 'CumOFI',
-        'func': 'calc_ofi',
+        'func': 'get_current_value', # Fetch pre-calculated
         'type': TYPE_OSCILLATOR,
         'name': 'COFI',
         'color': '#FFD700',  # Gold
-        'inputs': ['bid_price', 'bid_size', 'ask_price', 'ask_size'], 
-        'yaxis': 'y2',       # Overlay on secondary axis
+        'inputs': ['ofi'],   # Key in history
+        'args': [0],
+        'yaxis': 'y2',       
         'style': 'line',
         'legendrank': 240
     },
 
     # 5. 📚 Order Book (OBI)
-    # Order Book Imbalance: Net Pending Volume
+    # Order Book Imbalance (Cumulative from Shared Memory)
     {
         'id': 'CumOBI',
-        'func': 'calc_obi',
+        'func': 'get_current_value', # Fetch pre-calculated
         'type': TYPE_OSCILLATOR,
         'name': 'COBI',
         'color': '#00FFFF',  # Cyan
-        'inputs': ['bid_size', 'ask_size'], 
+        'inputs': ['obi'],   # Key in history
+        'args': [0],
         'yaxis': 'y2',
         'style': 'line',
         'legendrank': 250
