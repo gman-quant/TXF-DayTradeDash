@@ -25,7 +25,7 @@ def add_main_price_chart(fig, data, row=1, col=1):
             open=data['candles']['open'], high=data['candles']['high'],
             low=data['candles']['low'], close=data['candles']['close'],
             name=f'{current_tf} OHLC',
-            increasing_line_color=UI_COLOR['TEXT_MAIN'], decreasing_line_color=UI_COLOR['TEXT_MAIN'],
+            increasing_line_color=UI_COLOR['TEXT_SUB'], decreasing_line_color=UI_COLOR['TEXT_SUB'],
             increasing_line_width=1, decreasing_line_width=1,
 
             # 簡潔版 Tooltip
@@ -42,8 +42,8 @@ def add_main_price_chart(fig, data, row=1, col=1):
             open=data['candles']['open'], high=data['candles']['high'],
             low=data['candles']['low'], close=data['candles']['close'],
             name=f'{current_tf} Candle',
-            increasing_line_color=UI_COLOR['UP'], decreasing_line_color=UI_COLOR['DOWN'],
-            increasing_fillcolor=UI_COLOR['UP'], decreasing_fillcolor=UI_COLOR['DOWN'],
+            increasing_line_color=UI_COLOR['Kbar_UP'], decreasing_line_color=UI_COLOR['Kbar_DOWN'],
+            increasing_fillcolor=UI_COLOR['Kbar_UP'], decreasing_fillcolor=UI_COLOR['Kbar_DOWN'],
             
             # 簡潔版 Tooltip
             hovertemplate=(
@@ -73,7 +73,7 @@ def add_main_price_chart(fig, data, row=1, col=1):
             x=data['candle_x'],
             y=volumes,
             name='Volume',
-            marker_color='rgba(255, 240, 0, 0.25)', # 對應 UI_COLOR['HIGHLIGHT'] (#FFF000) 的半透明版
+            marker_color=UI_COLOR['VOLUME_FILL'], # 使用主題設定的填充色
             marker_line_width=0,
             xaxis='x',      # [Fix] Explicitly bind to main x-axis
             yaxis='y6',     # 指定使用我們剛定義的疊加軸
@@ -96,7 +96,7 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     
     trace_kwargs = dict(
         x=data['tick_x'], y=y_data, mode='lines', name=display_name,
-        line=dict(color=ind_config['color'], width=1, dash=ind_config.get('style', 'solid')),
+        line=dict(color=ind_config['color'], width=ind_config.get('width', 1), dash=ind_config.get('style', 'solid')),
         hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
     )
     
@@ -249,10 +249,10 @@ class OscillatorRenderers:
     @staticmethod
     def render_small_lot(fig, x_data, y_data, config, row, col):
         """繪製小單淨量 (Small Lot <5口) 柱狀圖"""
-        bar_colors = np.where(y_data >= 0, UI_COLOR['UP'], UI_COLOR['DOWN'])
+        cols = np.where(y_data >= 0, UI_COLOR['LOT_SMALL_UP'], UI_COLOR['LOT_SMALL_DOWN'])
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config.get('name', config['id'])} (< 5)",
-            marker_color=bar_colors, marker_line_width=0, opacity=1.0, legendrank=210,
+            marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=210,
             hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
         ), row=row, col=col, secondary_y=False) # 使用左軸
 
@@ -260,7 +260,7 @@ class OscillatorRenderers:
     def render_large_lot(fig, x_data, y_data, config, row, col):
         """繪製大單 (Large Lot >=5口) 柱狀圖"""
         # 雙色區分：Buy=深棕色, Sell=深藍 (對比強烈且專業)
-        cols = np.where(y_data >= 0, '#8C5B00', '#006D91')
+        cols = np.where(y_data >= 0, UI_COLOR['LOT_LARGE_UP'], UI_COLOR['LOT_LARGE_DOWN'])
         fig.add_hline(y=0, line_width=1, line_color="#555", row=row, col=col)
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config.get('name', config['id'])} (>= 5)",
@@ -272,7 +272,7 @@ class OscillatorRenderers:
     def render_mega_lot(fig, x_data, y_data, config, row, col):
         """繪製特大單 (Mega Lot >=15口) 柱狀圖"""
         # 雙色區分：Buy=洋紅(Neon), Sell=青色(Neon) -> 極度醒目
-        cols = np.where(y_data >= 0, '#FB00FF', '#00FFFF')
+        cols = np.where(y_data >= 0, UI_COLOR['LOT_MEGA_UP'], UI_COLOR['LOT_MEGA_DOWN'])
         fig.add_trace(go.Bar(
             x=x_data, y=y_data, name=f"{config.get('name', config['id'])} (>= 15)",
             marker_color=cols, marker_line_width=0, opacity=1.0, legendrank=230,

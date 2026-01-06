@@ -5,6 +5,8 @@ TYPE_OVERLAY = 'overlay'       # 疊加在主圖 (如 SMA, VWAP)
 TYPE_OSCILLATOR = 'oscillator' # 獨立副圖 (如 Momentum, RSI, Volume)
 TYPE_VIRTUAL = 'virtual'       # 虛擬指標 (如 VWAP Bands)
 
+from config.ui_theme import UI_COLOR
+
 # 預設不顯示的指標 ID 列表 (Default Hidden)
 # 您可以在這裡定義需要的標準差倍數
 VWAP_MULTIPLIERS = [1.0, 2.0, 2.5]
@@ -30,7 +32,7 @@ INDICATORS_SETUP = [
         'type': TYPE_OVERLAY,          # 畫在主圖
         'inputs': ['underlying_price'], # ⚠️ 需要這兩個累積陣列
         'name': 'TAIEX',                # 顯示名稱
-        'color': "#7F4A98",            # 棕色
+        'color': UI_COLOR['SPOT_PRICE'], # 棕紫色
         'style': 'solid',              # 實線 (區別於 50MA 的虛線)
         'legendrank': 110
     },
@@ -42,7 +44,7 @@ INDICATORS_SETUP = [
         'type': TYPE_OVERLAY,
         'inputs': ['session_high'],   
         'name': 'High',
-        'color': "#004E00",         
+        'color': UI_COLOR['SESSION_HIGH'],         
         'style': 'solid',
         'legendgroup': 'Session_HL_Group',
         'legendrank': 120
@@ -54,7 +56,8 @@ INDICATORS_SETUP = [
         'args': [0],                   
         'type': TYPE_OVERLAY,          
         'inputs': ['cum_pv', 'cum_volume'], 
-        'color': "#008692",           
+        'color': UI_COLOR['VWAP'], # Tiffany Blue
+        'width': 1,
         'style': 'solid',
         'legendgroup': 'VWAP_Cost_Group',
         'legendrank': 130
@@ -67,8 +70,8 @@ INDICATORS_SETUP = [
     {
         'id': 'Fractal_U',
         'type': TYPE_VIRTUAL,
-        'color': '#FF9F43', # Pastel Orange
-        'width': 2,
+        'color': UI_COLOR['COST_LINE'], # Dodger Blue - Distinct but softer than Neon Cyan
+        'width': 1,
         'name': 'Bull Cost',
         'legendgroup': 'VWAP_Cost_Group',
         'legendrank': 140
@@ -76,8 +79,8 @@ INDICATORS_SETUP = [
     {
         'id': 'Fractal_L',
         'type': TYPE_VIRTUAL,
-        'color': '#FF9F43', # Pastel Orange
-        'width': 2,
+        'color': UI_COLOR['COST_LINE'], # Dodger Blue - Distinct but softer than Neon Cyan
+        'width': 1,
         'name': 'Bear Cost',
         'legendgroup': 'VWAP_Cost_Group',
         'legendrank': 141
@@ -89,9 +92,9 @@ INDICATORS_SETUP = [
 
 # Helper to determine style based on SD
 def get_band_style(sd):
-    if sd == VWAP_MULTIPLIERS[0]: return '#28B463', 1  # Green, Thin
-    if sd == VWAP_MULTIPLIERS[1]: return '#F1C40F', 1  # Yellow, Thin
-    if sd >= VWAP_MULTIPLIERS[2]: return '#E74C3C', 2  # Red, Thick
+    if sd == VWAP_MULTIPLIERS[0]: return UI_COLOR['BAND_1'], 1  # 1.0: Cool Gray (Noise)
+    if sd == VWAP_MULTIPLIERS[1]: return UI_COLOR['BAND_2'], 1  # 2.0: Amber (Warning)
+    if sd >= VWAP_MULTIPLIERS[2]: return UI_COLOR['BAND_3'], 2  # 2.5: Neon Red (Extreme)
     return '#FFFFFF', 1
 
 for sd in VWAP_MULTIPLIERS:
@@ -143,7 +146,7 @@ INDICATORS_SETUP += [
         'type': TYPE_OVERLAY,
         'inputs': ['session_low'],
         'name': 'Low',
-        'color': "#780000",         
+        'color': UI_COLOR['SESSION_LOW'],         
         'style': 'solid',
         'legendgroup': 'Session_HL_Group',
         'legendrank': 120
@@ -155,7 +158,7 @@ INDICATORS_SETUP += [
         'args': [0],
         'type': 'hidden',          # 標記為 hidden (稍後 Dashboard 會過濾掉不畫)
         'inputs': ['total_volume'],  # 對應 RingBuffer 的累積量
-        'color': '#FFFFFF',
+        'color': UI_COLOR['TEXT_MAIN'],
         'style': 'solid'
     },
     # --- 技術指標 ---
@@ -234,7 +237,7 @@ INDICATORS_SETUP += [
         'args': [0],
         'type': TYPE_OSCILLATOR,
         'inputs': ['cum_buy_vol', 'cum_sell_vol'],
-        'color': "#FFF000",
+        'color': UI_COLOR['CVD'],
         'style': 'solid',
         'yaxis': 'y2'       # 🆕 新增：指定使用右側 Y 軸
     },
@@ -259,7 +262,7 @@ INDICATORS_SETUP += [
         'func': 'calc_small_lot_net',
         'type': TYPE_OSCILLATOR,
         'name': 'Small Lot',
-        'color': '#00FF00',  # 綠色
+        'color': UI_COLOR['LOT_SMALL_UP'],
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # < 5
         'yaxis': 'y',
@@ -274,7 +277,7 @@ INDICATORS_SETUP += [
         'func': 'calc_large_lot_net', # Inclusive
         'type': TYPE_OSCILLATOR,
         'name': 'Large Lot',
-        'color': '#FFD700',  # 金黃色
+        'color': UI_COLOR['LOT_LARGE_UP'],
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # >= 5
         'yaxis': 'y',
@@ -289,7 +292,7 @@ INDICATORS_SETUP += [
         'func': 'calc_large_lot_net',
         'type': TYPE_OSCILLATOR,
         'name': 'Mega Lot',
-        'color': '#FF0000',  # 紅色
+        'color': UI_COLOR['LOT_MEGA_UP'],
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 15],   # >= 15
         'yaxis': 'y',
@@ -311,7 +314,7 @@ INDICATORS_SETUP += [
         'func': 'get_current_value', # Fetch pre-calculated
         'type': TYPE_OSCILLATOR,
         'name': 'COFI',
-        'color': '#FFD700',  # Gold
+        'color': UI_COLOR['OFI'],  # Gold
         'inputs': ['ofi'],   # Key in history
         'args': [0],
         'yaxis': 'y2',       
@@ -326,7 +329,7 @@ INDICATORS_SETUP += [
         'func': 'get_current_value', # Fetch pre-calculated
         'type': TYPE_OSCILLATOR,
         'name': 'COBI',
-        'color': '#00FFFF',  # Cyan
+        'color': UI_COLOR['OBI'],  # Cyan
         'inputs': ['obi'],   # Key in history
         'args': [0],
         'yaxis': 'y2',

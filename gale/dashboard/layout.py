@@ -246,7 +246,7 @@ def create_scoreboard_html(last_price, change, change_pct, open_price, high, low
             # Column 4: Volume & Cost (量價結構)
             # 針對成本與動能：VWAP、Volume
             html.Div(children=[
-                html.Div([html.Span("VWAP:", style=LABEL_STYLE), html.Span(f"{vwap:,.0f}", style={'color': UI_COLOR['CYAN']})], style=ROW_STYLE),
+                html.Div([html.Span("VWAP:", style=LABEL_STYLE), html.Span(f"{vwap:,.0f}", style={'color': UI_COLOR['VWAP']})], style=ROW_STYLE),
                 html.Div([html.Span("Volume:", style=LABEL_STYLE), html.Span(f"{vol:,.0f}", style={'color': UI_COLOR['TEXT_MAIN']})], style=ROW_STYLE),
             ]),
         ])
