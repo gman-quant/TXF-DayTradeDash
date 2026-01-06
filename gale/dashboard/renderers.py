@@ -41,7 +41,7 @@ def add_main_price_chart(fig, data, row=1, col=1):
             x=data['candle_x'],
             open=data['candles']['open'], high=data['candles']['high'],
             low=data['candles']['low'], close=data['candles']['close'],
-            name=f'{current_tf} Candle',
+            name=f'{current_tf} Candles',
             increasing_line_color=UI_COLOR['Kbar_UP'], decreasing_line_color=UI_COLOR['Kbar_DOWN'],
             increasing_fillcolor=UI_COLOR['Kbar_UP'], decreasing_fillcolor=UI_COLOR['Kbar_DOWN'],
             

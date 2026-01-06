@@ -216,176 +216,202 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         import plotly.graph_objects as go
         from datetime import datetime, timedelta
         
-        # 1. 重建 Figure 物件
-        fig = go.Figure(fig_data)
-        
-        # 2. 生成檔名 (Session Logic)
-        now = datetime.now()
-        ts_str = now.strftime('%Y-%m-%d %H:%M:%S') # [Fix] Define ts_str for HTML template
-        
-        # ┌──────────────────────────────────────────────────────────────────┐
-        # │ 檔案命名邏輯 (Filename Logic) - 依據交易日 (Trade Date)              │
-        # │ ---------------------------------------------------------------- │
-        # │ 1. Day Session (08:45~13:45) -> T日 (e.g., "2023-10-01")         │
-        # │ 2. Night Session (15:00~05:00) -> T+1日 (e.g., "2023-10-02-n")   │
-        # │    (夜盤交易歸屬於「次一交易日」)                                     │
-        # └──────────────────────────────────────────────────────────────────┘
-        
-        # [Mode A] History Replay
-        if args and args.mode == 'history' and args.date:
-            date_str = args.date
-            suffix = '-n' if args.session == 'night' else ''
+        try:
+            # 1. Sanitize Data (Fix: Remove 'yaxisN' keys from rangeslider causing ValueError)
+            # Plotly.js sometimes sends back rangeslider state with invalid keys like 'yaxis6'
+            if 'layout' in fig_data:
+                layout = fig_data['layout']
+                # Iterate over all keys that might be x-axes (xaxis, xaxis2, xaxis3...)
+                for key in layout:
+                    if key.startswith('xaxis'):
+                        axis = layout[key]
+                        if isinstance(axis, dict) and 'rangeslider' in axis:
+                            rs = axis['rangeslider']
+                            if isinstance(rs, dict):
+                                keys_to_remove = [k for k in rs.keys() if k.startswith('yaxis') and k != 'yaxis']
+                                for k in keys_to_remove:
+                                    del rs[k]
 
-        # [Mode B] Live / Forward Test
-        # Case 1: 凌晨 (00:00 ~ 08:45) -> 仍屬於夜盤 (Trade Date = Today)
-        # 例如: 10/02 04:00 -> 屬於 10/02 的夜盤 (接續 10/01 15:00 開盤的場次)
-        elif now.time() < DAY_SESSION_START:
-            date_str = now.strftime('%Y-%m-%d')
-            suffix = '-n'
+            # 2. 重建 Figure 物件
+            fig = go.Figure(fig_data)
             
-        # Case 2: 下午/晚上 (15:00 ~ 23:59) -> 屬於「隔日」夜盤 (Trade Date = Tomorrow)
-        # 例如: 10/01 20:00 -> 歸屬為 10/02 的夜盤
-        elif now.time() >= NIGHT_SESSION_START:
-            date_str = (now + timedelta(days=1)).strftime('%Y-%m-%d')
-            suffix = '-n'
+            # 3. 生成檔名 (Session Logic)
+            now = datetime.now()
+            ts_str = now.strftime('%Y-%m-%d %H:%M:%S') # [Fix] Define ts_str for HTML template
             
-        # Case 3: 日盤 (08:45 ~ 13:45) -> 屬於今日日盤
-        else:
-            date_str = now.strftime('%Y-%m-%d')
-            suffix = ''
+            # ┌──────────────────────────────────────────────────────────────────┐
+            # │ 檔案命名邏輯 (Filename Logic) - 依據交易日 (Trade Date)              │
+            # │ ---------------------------------------------------------------- │
+            # │ 1. Day Session (08:45~13:45) -> T日 (e.g., "2023-10-01")         │
+            # │ 2. Night Session (15:00~05:00) -> T+1日 (e.g., "2023-10-02-n")   │
+            # │    (夜盤交易歸屬於「次一交易日」)                                     │
+            # └──────────────────────────────────────────────────────────────────┘
             
-        filename = f"TXF-Chart-{date_str}{suffix}.html"
-        
-        # 3. 建構 HTML 內容 (Header + Plot)
-        def write_full_html():
-            # [Revert] 回復為全黑模式 (Dark Theme)
-            # 強制設定圖表高度與 RWD
-            fig.layout.height = None
-            fig.layout.autosize = True
-            
-            plot_html = fig.to_html(
-                include_plotlyjs='cdn', 
-                full_html=False, 
-                config={'scrollZoom': True, 'displayModeBar': True, 'responsive': True}, 
-                default_height='100%',
-                default_width='100%'
-            )
-            
-            # B. 產生 Scoreboard HTML (完整版)
-            if not sb_data:
-                header_html = "<div style='color:white; text-align:center'>No Data</div>"
+            # [Mode A] History Replay
+            if args and args.mode == 'history' and args.date:
+                date_str = args.date
+                suffix = '-n' if args.session == 'night' else ''
+
+            # [Mode B] Live / Forward Test
+            # Case 1: 凌晨 (00:00 ~ 08:45) -> 仍屬於夜盤 (Trade Date = Today)
+            # 例如: 10/02 04:00 -> 屬於 10/02 的夜盤 (接續 10/01 15:00 開盤的場次)
+            elif now.time() < DAY_SESSION_START:
+                date_str = now.strftime('%Y-%m-%d')
+                suffix = '-n'
+                
+            # Case 2: 下午/晚上 (15:00 ~ 23:59) -> 屬於「隔日」夜盤 (Trade Date = Tomorrow)
+            # 例如: 10/01 20:00 -> 歸屬為 10/02 的夜盤
+            elif now.time() >= NIGHT_SESSION_START:
+                date_str = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+                suffix = '-n'
+                
+            # Case 3: 日盤 (08:45 ~ 13:45) -> 屬於今日日盤
             else:
-                # --- 數據準備 ---
-                price = sb_data.get('last_price', 0)
-                change = sb_data.get('change', 0)
-                pct = sb_data.get('change_pct', 0)
-                vol = sb_data.get('vol', 0)
-                high = sb_data.get('high', 0)
-                low = sb_data.get('low', 0)
-                prev_close = sb_data.get('prev_close', 0)
-                open_p = sb_data.get('open_price', 0)
-                vwap = sb_data.get('vwap', 0)
-                u_price = sb_data.get('underlying_price', 0)
+                date_str = now.strftime('%Y-%m-%d')
+                suffix = ''
                 
-                # --- 邏輯計算 (Dark Mode) ---
-                main_color = '#2ECC40' if change >= 0 else '#FF4136'
-                sign = '+' if change >= 0 else ''
+            filename = f"TXF-Chart-{date_str}{suffix}.html"
+            
+            # 3. 建構 HTML 內容 (Header + Plot)
+            def write_full_html():
+                # [Revert] 回復為全黑模式 (Dark Theme)
+                # 強制設定圖表高度與 RWD
+                fig.layout.height = None
+                fig.layout.autosize = True
                 
-                gap = open_p - prev_close
-                gap_color = '#2ECC40' if gap >= 0 else '#FF4136'
-                gap_sign = '+' if gap >= 0 else ''
+                plot_html = fig.to_html(
+                    include_plotlyjs='cdn', 
+                    full_html=False, 
+                    config={'scrollZoom': True, 'displayModeBar': True, 'responsive': True}, 
+                    default_height='100%',
+                    default_width='100%'
+                )
                 
-                basis = price - u_price
-                basis_color = '#FFF000'
-                basis_sign = '+' if basis >= 0 else ''
-                
-                chg_open = price - open_p
-                chg_open_color = '#2ECC40' if chg_open >= 0 else '#FF4136'
-                chg_open_sign = '+' if chg_open >= 0 else ''
-                
-                day_range = high - low
+                # B. 產生 Scoreboard HTML (完整版)
+                if not sb_data:
+                    header_html = "<div style='color:white; text-align:center'>No Data</div>"
+                else:
+                    # --- 數據準備 ---
+                    price = sb_data.get('last_price', 0)
+                    change = sb_data.get('change', 0)
+                    pct = sb_data.get('change_pct', 0)
+                    vol = sb_data.get('vol', 0)
+                    high = sb_data.get('high', 0)
+                    low = sb_data.get('low', 0)
+                    prev_close = sb_data.get('prev_close', 0)
+                    open_p = sb_data.get('open_price', 0)
+                    vwap = sb_data.get('vwap', 0)
+                    u_price = sb_data.get('underlying_price', 0)
+                    
+                    # --- 邏輯計算 (Dark Mode) ---
+                    main_color = '#2ECC40' if change >= 0 else '#FF4136'
+                    sign = '+' if change >= 0 else ''
+                    
+                    gap = open_p - prev_close
+                    gap_color = '#2ECC40' if gap >= 0 else '#FF4136'
+                    gap_sign = '+' if gap >= 0 else ''
+                    
+                    basis = price - u_price
+                    basis_color = '#FFF000'
+                    basis_sign = '+' if basis >= 0 else ''
+                    
+                    chg_open = price - open_p
+                    chg_open_color = '#2ECC40' if chg_open >= 0 else '#FF4136'
+                    chg_open_sign = '+' if chg_open >= 0 else ''
+                    
+                    day_range = high - low
 
-                # --- HTML 模板 (Dark Context) ---
-                header_html = f"""
-                <div style="background-color: #1E1E1E; color: white; padding: 15px; border-radius: 10px; border: 1px solid {main_color}; margin-bottom: 20px; font-family: sans-serif; display: flex; justify-content: center; align-items: center;">
-                    
-                    <!-- [Left] Price Block -->
-                    <div style="margin-right: 50px; text-align: center;">
-                        <div style="font-size: 48px; font-weight: bold; color: {main_color}; line-height: 1;">{price:,.0f}</div>
-                        <div style="font-size: 20px; color: {main_color}; margin-top: 8px;">{sign}{change:.0f} ({sign}{pct:.2f}%)</div>
-                    </div>
-                    
-                    <!-- [Right] Full Info Grid (4 Columns) -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px 40px; text-align: left; font-size: 14px; line-height: 1.6; color: #BBB;">
+                    # --- HTML 模板 (Dark Context) ---
+                    header_html = f"""
+                    <div style="background-color: #1E1E1E; color: white; padding: 15px; border-radius: 10px; border: 1px solid {main_color}; margin-bottom: 20px; font-family: sans-serif; display: flex; justify-content: center; align-items: center;">
                         
-                        <!-- Col 1: Range (波動邊界) -->
-                        <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">High:</span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low:</span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range:</span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
+                        <!-- [Left] Price Block -->
+                        <div style="margin-right: 50px; text-align: center;">
+                            <div style="font-size: 48px; font-weight: bold; color: {main_color}; line-height: 1;">{price:,.0f}</div>
+                            <div style="font-size: 20px; color: {main_color}; margin-top: 8px;">{sign}{change:.0f} ({sign}{pct:.2f}%)</div>
                         </div>
+                        
+                        <!-- [Right] Full Info Grid (4 Columns) -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px 40px; text-align: left; font-size: 14px; line-height: 1.6; color: #BBB;">
+                            
+                            <!-- Col 1: Range (波動邊界) -->
+                            <div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">High:</span><span style="color:#2ECC40; font-weight:bold;">{high:,.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low:</span><span style="color:#FF4136; font-weight:bold;">{low:,.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range:</span><span style="color:#FFF000; font-weight:bold;">{day_range:.0f}</span></div>
+                            </div>
 
-                        <!-- Col 2: Context (市場參照) -->
-                        <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot:</span><span style="color:#FFF;">{u_price:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
-                        </div>
+                            <!-- Col 2: Context (市場參照) -->
+                            <div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:#BBB;">{prev_close:,.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot:</span><span style="color:#FFF;">{u_price:,.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
+                            </div>
 
-                        <!-- Col 3: Opening (開盤動態) -->
-                        <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open:</span><span style="color:#FFF;">{open_p:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
-                        </div>
+                            <!-- Col 3: Opening (開盤動態) -->
+                            <div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open:</span><span style="color:#FFF;">{open_p:,.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
+                            </div>
 
-                        <!-- Col 4: Cost & Volume (量價結構) -->
-                        <div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
-                            <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume:</span><span style="color:#FFF;">{vol:,.0f}</span></div>
+                            <!-- Col 4: Cost & Volume (量價結構) -->
+                            <div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:#008692; font-weight:bold;">{vwap:,.0f}</span></div>
+                                <div><span style="color:#BBB; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume:</span><span style="color:#FFF;">{vol:,.0f}</span></div>
+                            </div>
                         </div>
                     </div>
-                </div>
+                    """
+                    
+                return f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="utf-8">
+                    <title>TXF {date_str}{suffix}</title>
+                    <style>
+                        body {{ 
+                            background-color: #111; 
+                            color: #ddd; 
+                            margin: 0; 
+                            padding: 20px; 
+                            font-family: sans-serif; 
+                            height: 100vh; 
+                            display: flex; 
+                            flex-direction: column; 
+                            box-sizing: border-box; 
+                        }}
+                        h2 {{ text-align: center; color: #fff; margin: 0 0 15px 0; font-size: 24px; }}
+                        
+                        /* Force plot to take remaining space (Responsive) */
+                        .plotly-graph-div {{ 
+                            flex: 1; 
+                            width: 100%; 
+                            height: 85vh !important; 
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {'🌙' if suffix else '☀️'}</h2>
+                    {header_html}
+                    {plot_html}
+                </body>
+                </html>
                 """
                 
-            return f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>TXF {date_str}{suffix}</title>
-                <style>
-                    body {{ 
-                        background-color: #111; 
-                        color: #ddd; 
-                        margin: 0; 
-                        padding: 20px; 
-                        font-family: sans-serif; 
-                        height: 100vh; 
-                        display: flex; 
-                        flex-direction: column; 
-                        box-sizing: border-box; 
-                    }}
-                    h2 {{ text-align: center; color: #fff; margin: 0 0 15px 0; font-size: 24px; }}
-                    
-                    /* Force plot to take remaining space (Responsive) */
-                    .plotly-graph-div {{ 
-                        flex: 1; 
-                        width: 100%; 
-                        height: 85vh !important; 
-                    }}
-                </style>
-            </head>
-            <body>
-                <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {'🌙' if suffix else '☀️'}</h2>
-                {header_html}
-                {plot_html}
-            </body>
-            </html>
-            """
-            return full_html
+            return dict(content=write_full_html(), filename=filename)
+
+        except Exception as e:
+            # 捕獲所有異常並輸出到控制台
+            error_msg = traceback.format_exc()
+            print(f"❌ Save HTML Error: {error_msg}")
             
-        return dict(content=write_full_html(), filename=filename)
+            # 回傳錯誤日誌檔案給使用者，而不是無反應
+            return dict(
+                content=f"Error exporting HTML snapshot:\n\n{error_msg}",
+                filename="snapshot_error.txt"
+            )
 
     # 啟動 Flask Server
     app.run(debug=False, port=port, host='0.0.0.0', use_reloader=False)
