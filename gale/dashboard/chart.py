@@ -190,6 +190,11 @@ def build_combined_figure(data):
     
     initial_range = data.get('default_range')
 
+    # 計算 Volume Max 用於設定 yaxis6 的 range (使 Bars 縮在底部)
+    vol_max = 0
+    if 'candles' in data and 'volume' in data['candles'] and len(data['candles']['volume']) > 0:
+        vol_max = max(data['candles']['volume'])
+
     fig.update_layout(
         # --- 1. 基礎外觀 (Appearance) ---
         template='plotly_dark',
@@ -296,6 +301,17 @@ def build_combined_figure(data):
             visible=False,  
             matches=None    
         ),
+
+        # [Axis 6] Volume Bars (Overlay on Row 1)
+        # 設定 range 讓成量只佔據底部約 1/5 ~ 1/4 的高度
+        yaxis6=dict(
+            overlaying='y',
+            side='left',
+            showgrid=False,
+            showticklabels=False, # 隱藏數值避免雜亂，由 Tooltip 顯示即可
+            range=[0, vol_max * 5] if vol_max > 0 else [0, 10], 
+            fixedrange=True # 不隨縮放改變 y 軸比例 (保持 Bars 在底部)
+        )
     )
     
     # [CRITICAL FIX]

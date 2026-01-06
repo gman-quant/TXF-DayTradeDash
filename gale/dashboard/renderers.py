@@ -31,11 +31,9 @@ def add_main_price_chart(fig, data, row=1, col=1):
             # 簡潔版 Tooltip
             hovertemplate=(
                 '<b>%{x|%H:%M:%S}</b><br>' +
-                'H: %{high}<br>C: %{close}<br>O: %{open}<br>L: %{low}<br>' +
-                'V: %{text}' +
+                'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
                 '<extra></extra>' 
             ),
-            text=[f'{v:,}' for v in data['candles']['volume']], # 預先格式化成交量字串
             legendrank=100
         ), row=row, col=col)
     else:
@@ -51,12 +49,40 @@ def add_main_price_chart(fig, data, row=1, col=1):
             hovertemplate=(
                 '<b>%{x|%H:%M:%S}</b><br>' +
                 'H: %{high}<br>C: %{close}<br>O: %{open}<br>L: %{low}<br>' +
-                'V: %{text}' +
                 '<extra></extra>' 
             ),
-            text=[f'{v:,}' for v in data['candles']['volume']], # 預先格式化成交量字串
             legendrank=100
         ), row=row, col=col)
+
+    # [New] Add Volume Bars (Overlay on Bottom)
+    # ---------------------------------------------------------
+    # 使用 yaxis6 (Overlay) 將 Volume 畫在底部
+    
+    # [New] Add Volume Bars (Overlay on Bottom)
+    # ---------------------------------------------------------
+    # 使用 yaxis6 (Overlay) 將 Volume 畫在底部
+    
+    if 'volume' in data['candles']:
+        volumes = data['candles']['volume']
+        
+        # [Visual Update] Monochrome Volume Bars
+        # 使用單一顏色（半透明 HIGHLIGHT 黃色），營造「金山」效果。
+        # 不需要計算 Open/Close，效能最佳。
+        
+        fig.add_trace(go.Bar(
+            x=data['candle_x'],
+            y=volumes,
+            name='Volume',
+            marker_color='rgba(255, 240, 0, 0.25)', # 對應 UI_COLOR['HIGHLIGHT'] (#FFF000) 的半透明版
+            marker_line_width=0,
+            xaxis='x',      # [Fix] Explicitly bind to main x-axis
+            yaxis='y6',     # 指定使用我們剛定義的疊加軸
+            showlegend=False, # 不顯示圖例 (節省空間)
+            hovertemplate=(
+                'Vol: %{y:,}<br>' +
+                '<extra></extra>'
+            )
+        ))
 
 def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     """
