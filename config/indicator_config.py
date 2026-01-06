@@ -6,10 +6,12 @@ TYPE_OSCILLATOR = 'oscillator' # 獨立副圖 (如 Momentum, RSI, Volume)
 TYPE_VIRTUAL = 'virtual'       # 虛擬指標 (如 VWAP Bands)
 
 # 預設不顯示的指標 ID 列表 (Default Hidden)
+# 您可以在這裡定義需要的標準差倍數
+VWAP_MULTIPLIERS = [1.0, 2.0, 2.5]
+
 DEFAULT_OFF_LEGENDS = [
-    'VWAP_Band_1.0',
-    'VWAP_Band_2.0',
-    'VWAP_Band_2.5',
+    f'VWAP_Band_{sd}' for sd in VWAP_MULTIPLIERS
+] + [
     # 'SMA_3min', 
     # 'SMA_60', 
     # 'Max_250',
@@ -81,99 +83,57 @@ INDICATORS_SETUP = [
         'legendrank': 141
     },
 
-    # --- Global VWAP Bands ---
-    {
-        'id': 'VWAP_Band_1.0',
-        'type': TYPE_VIRTUAL,
-        'subtype': 'vwap_band',
-        'sd': 1.0,
-        'color': '#28B463', # Green
-        'width': 1,
-        'name': 'VWAP ±1.0σ'
-    },
-    {
-        'id': 'VWAP_Band_2.0',
-        'type': TYPE_VIRTUAL,
-        'subtype': 'vwap_band',
-        'sd': 2.0,
-        'color': '#F1C40F', # Yellow
-        'width': 1,
-        'name': 'VWAP ±2.0σ'
-    },
-    {
-        'id': 'VWAP_Band_2.5',
-        'type': TYPE_VIRTUAL,
-        'subtype': 'vwap_band',
-        'sd': 2.5,
-        'color': '#E74C3C', # Red
-        'width': 2,
-        'name': 'VWAP ±2.5σ'
-    },
-    
-    # --- Regime StdDev Bands (Comparison) ---
-    # Bull Regime (Upper)
-    {
-        'id': 'Bull_Band_1.0',
-        'type': TYPE_VIRTUAL,
-        'color': '#28B463', # Green
-        'width': 1,
-        'style': 'dash',
-        'name': 'Bull +1.0σ',
-        'legendgroup': 'Regime_Upper',
-        'legendrank': 170
-    },
-    {
-        'id': 'Bull_Band_2.0',
-        'type': TYPE_VIRTUAL,
-        'color': '#F1C40F', # Yellow
-        'width': 2,
-        'style': 'dash',
-        'name': 'Bull +2.0σ',
-        'legendgroup': 'Regime_Upper',
-        'legendrank': 171
-    },
-    {
-        'id': 'Bull_Band_2.5',
-        'type': TYPE_VIRTUAL,
-        'color': '#E74C3C', # Red
-        'width': 2,
-        'style': 'dash',
-        'name': 'Bull +2.5σ',
-        'legendgroup': 'Regime_Upper',
-        'legendrank': 172
-    },
+    # --- Global VWAP Bands (Auto-Generated) ---
+    # Generated from VWAP_MULTIPLIERS
+]
 
-    # Bear Regime (Lower)
-    {
-        'id': 'Bear_Band_1.0',
+# Helper to determine style based on SD
+def get_band_style(sd):
+    if sd == VWAP_MULTIPLIERS[0]: return '#28B463', 1  # Green, Thin
+    if sd == VWAP_MULTIPLIERS[1]: return '#F1C40F', 1  # Yellow, Thin
+    if sd >= VWAP_MULTIPLIERS[2]: return '#E74C3C', 2  # Red, Thick
+    return '#FFFFFF', 1
+
+for sd in VWAP_MULTIPLIERS:
+    color, width = get_band_style(sd)
+    
+    # 1. Global VWAP Bands
+    INDICATORS_SETUP.append({
+        'id': f'VWAP_Band_{sd}',
         'type': TYPE_VIRTUAL,
-        'color': '#28B463', # Green
-        'width': 1,
-        'style': 'dash',
-        'name': 'Bear -1.0σ',
-        'legendgroup': 'Regime_Lower',
-        'legendrank': 180
-    },
-    {
-        'id': 'Bear_Band_2.0',
+        'subtype': 'vwap_band',
+        'sd': sd,
+        'color': color,
+        'width': width,
+        'name': f'VWAP ±{sd}σ'
+    })
+    
+    # 2. Bull Regime (Upper)
+    INDICATORS_SETUP.append({
+        'id': f'Bull_Band_{sd}',
         'type': TYPE_VIRTUAL,
-        'color': '#F1C40F', # Yellow
-        'width': 2,
+        'color': color,
+        'width': width,
         'style': 'dash',
-        'name': 'Bear -2.0σ',
-        'legendgroup': 'Regime_Lower',
-        'legendrank': 181
-    },
-    {
-        'id': 'Bear_Band_2.5',
+        'name': f'Bull +{sd}σ',
+        'legendgroup': 'Regime_Upper',
+        'legendrank': 170 + int(sd)
+    })
+
+    # 3. Bear Regime (Lower)
+    INDICATORS_SETUP.append({
+        'id': f'Bear_Band_{sd}',
         'type': TYPE_VIRTUAL,
-        'color': '#E74C3C', # Red
-        'width': 2,
+        'color': color,
+        'width': width,
         'style': 'dash',
-        'name': 'Bear -2.5σ',
+        'name': f'Bear -{sd}σ',
         'legendgroup': 'Regime_Lower',
-        'legendrank': 182
-    },
+        'legendrank': 180 + int(sd)
+    })
+
+# Continue with remaining indicators
+INDICATORS_SETUP += [
 
     # 當盤最低價
     {
