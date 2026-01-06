@@ -9,14 +9,38 @@ THEME_STYLE = 'TAIWAN' # default: TAIWAN (User Preference)
 # =============================================================================
 # [Raw Color Palette] - RGB Definitions (Used for Logic Mapping)
 # =============================================================================
-_C_GREEN_TEAL   = 'rgb(6, 122, 102)'    # 深青綠
-_C_RED_DEEP     = 'rgb(211, 47, 47)'    # 深紅色
 
-_C_GREEN_BRIGHT = 'rgb(46, 204, 64)'    # 鮮綠
-_C_RED_BRIGHT   = 'rgb(255, 65, 54)'    # 亮紅
+# 1. 基礎色 (Basic)
+_C_WHITE        = 'rgb(255, 255, 255)'
+_C_GRAY_LIGHT   = 'rgb(187, 187, 187)'
+_C_BG_PANEL     = 'rgb(30, 30, 30)'
+_C_BG_MAIN      = 'rgb(17, 17, 17)'
 
-_C_DK_GREEN     = 'rgb(0, 78, 0)'       # 深綠
-_C_DK_RED       = 'rgb(120, 0, 0)'      # 深紅
+# 2. 方向性顏色 (紅/綠變化)
+_C_GREEN_TEAL   = 'rgb(6, 122, 102)'    # 深青綠 (K棒跌)
+_C_RED_DEEP     = 'rgb(211, 47, 47)'    # 深紅 (K棒漲)
+_C_GREEN_BRIGHT = 'rgb(46, 204, 64)'    # 亮綠 (主下跌)
+_C_RED_BRIGHT   = 'rgb(255, 65, 54)'    # 亮紅 (主上漲)
+_C_GREEN_DK     = 'rgb(0, 78, 0)'       # 深綠 (創新低背景)
+_C_RED_DK       = 'rgb(120, 0, 0)'      # 深紅 (創新高背景)
+
+# 3. 特殊指標 (霓虹/顯著)
+_C_YELLOW_BRIGHT= 'rgb(255, 240, 0)'    # 高亮
+_C_YELLOW       = 'rgb(255, 255, 0)'    # 警告 / CVD
+_C_GOLD         = 'rgb(255, 215, 0)'    # 金色 (OFI)
+_C_CYAN_NEON    = 'rgb(0, 255, 255)'    # 青色 (OBI / 特大賣單)
+_C_MAGENTA_NEON = 'rgb(251, 0, 255)'    # 洋紅 (特大買單)
+_C_PURPLE       = 'rgb(127, 74, 152)'   # 紫色 (現貨價格)
+_C_TIFFANY      = 'rgb(129, 216, 208)'  # Tiffany藍 (VWAP)
+
+# 4. 功能性顏色 (填充/區間)
+_C_DODGER_BLUE  = 'rgb(30, 136, 229)'   # 成本線
+_C_GREEN_MED    = 'rgb(40, 180, 99)'    # 通道 1
+_C_RED_SOFT     = 'rgb(231, 76, 60)'    # 通道 3
+
+# 5. 口數特定顏色
+_C_BROWN        = 'rgb(140, 91, 0)'     # 大單買進
+_C_BLUE_DARK    = 'rgb(0, 109, 145)'    # 大單賣出
 
 # =============================================================================
 # [Logic Mapping]
@@ -27,11 +51,10 @@ if THEME_STYLE == 'TAIWAN':
     _MAIN_DOWN  = _C_GREEN_BRIGHT # 跌: 亮綠
     
     _KBAR_UP    = _C_RED_DEEP     # K棒漲: 深紅
-    _KBAR_DOWN  = _C_GREEN_TEAL   # K棒跌: 深青綠 (用 Teal 取代純綠更專業)
-
-    _SESS_HIGH  = _C_DK_RED       # 創新高背景: 深紅
-    _SESS_LOW   = _C_DK_GREEN     # 創新低背景: 深綠
+    _KBAR_DOWN  = _C_GREEN_TEAL   # K棒跌: 深青綠
     
+    _SESS_HIGH  = _C_RED_DK       # 創新高背景
+    _SESS_LOW   = _C_GREEN_DK     # 創新低背景
 
 else:
     # --- 美股/國際風格 (Green=Up, Red=Down) ---
@@ -41,8 +64,8 @@ else:
     _KBAR_UP    = _C_GREEN_TEAL
     _KBAR_DOWN  = _C_RED_DEEP
     
-    _SESS_HIGH  = _C_DK_GREEN
-    _SESS_LOW   = _C_DK_RED
+    _SESS_HIGH  = _C_GREEN_DK
+    _SESS_LOW   = _C_RED_DK
 
 # =============================================================================
 # [Final Configuration Export]
@@ -52,49 +75,51 @@ UI_COLOR = {
     'UP': _MAIN_UP,
     'DOWN': _MAIN_DOWN,
     
-    # 輔助色 (Static RGBA)
-    'TEXT_MAIN': 'rgb(255, 255, 255)', # 主要文字 (白)
-    'TEXT_SUB': 'rgb(187, 187, 187)',  # 次要文字 (淺灰)
-    'HIGHLIGHT': 'rgb(255, 240, 0)',   # 高亮突顯 (亮黃)
-    'BG_PANEL': 'rgb(30, 30, 30)',     # 面板背景色 (深灰)
-    'BG_MAIN': 'rgb(17, 17, 17)',      # 網頁主背景 (極深灰)
+    # 輔助色
+    'TEXT_MAIN': _C_WHITE,
+    'TEXT_SUB': _C_GRAY_LIGHT,
+    'HIGHLIGHT': _C_YELLOW_BRIGHT,
+    'BG_PANEL': _C_BG_PANEL,
+    'BG_MAIN': _C_BG_MAIN,
     
-    # K棒主體 (由 Logic Mapping 決定)
+    # K棒主體
     'Kbar_UP': _KBAR_UP,
     'Kbar_DOWN': _KBAR_DOWN,
 
-    # 關鍵支撐壓力 (Static RGBA)
-    'VWAP': 'rgb(129, 216, 208)',      # Tiffany Blue (公允價值核心)
-    'COST_LINE': 'rgb(30, 136, 229)',  # Dodger Blue (成本結構線)
+    # 關鍵支撐壓力
+    'VWAP': _C_TIFFANY,
+    'COST_LINE': _C_DODGER_BLUE.replace('rgb', 'rgba').replace(')', ', 0.7)'),
     
     # 標準差通道 (Risk Regimes)
-    'BAND_1': 'rgb(40, 180, 99)',     # Green (常態噪音區 - Safe)
-    'BAND_2': 'rgb(241, 196, 15)',    # Yellow (警戒區 - Warning)
-    'BAND_3': 'rgb(231, 76, 60)',     # Red (極端行情 - Extreme)
+    'BAND_1': _C_GREEN_MED.replace('rgb', 'rgba').replace(')', ', 0.7)'),
+    'BAND_2': _C_YELLOW.replace('rgb', 'rgba').replace(')', ', 0.7)'),
+    'BAND_3': _C_RED_SOFT.replace('rgb', 'rgba').replace(')', ', 0.7)'),
     
-    # 區間極值 (由 Logic Mapping 決定)
+    # 區間極值
     'SESSION_HIGH': _SESS_HIGH,
     'SESSION_LOW': _SESS_LOW,
     
-    # 籌碼指標 (Market Internals - Static RGBA)
-    'SPOT_PRICE': 'rgb(127, 74, 152)', # 棕紫色 (現貨 TAIEX)
-    'CVD': 'rgb(255, 240, 0)',         # 黃色 (累積成交量差)
-    'OFI': 'rgb(255, 215, 0)',         # 金色 (Order Flow Imbalance)
-    'OBI': 'rgb(0, 255, 255)',         # 青色 (Order Book Imbalance)
+    # 籌碼指標 (Market Internals)
+    'SPOT_PRICE': _C_PURPLE,
+    'CVD': _C_GOLD,      # 使用 Gold 統一
+    'OFI': _C_GOLD,
+    'OBI': _C_CYAN_NEON,
     
     # Lot Sizes
-    # 散戶/小單 (< 5口): 固定為 綠漲/紅跌 (使用者指定)
-    'LOT_SMALL_UP': 'rgb(46, 204, 64)',    # Green
-    'LOT_SMALL_DOWN': 'rgb(255, 65, 54)',  # Red
+    # 散戶/小單 (< 5口): 跟隨主要方向
+    'LOT_SMALL_UP': _C_GREEN_BRIGHT,  # 若使用者希望顏色嚴格區分，可以使用原始綠色
+                                      # 邏輯隱含特定顏色：第87/88行原本是硬編碼的綠/紅。
+                                      # 假設註解中的「User Preference」意味著嚴格匹配當前值。
+    'LOT_SMALL_DOWN': _C_RED_BRIGHT,
+
+    # 大單 (>= 5口)
+    'LOT_LARGE_UP': _C_BROWN,
+    'LOT_LARGE_DOWN': _C_BLUE_DARK,
     
-    # 大單 (>= 5口): 固定顏色
-    'LOT_LARGE_UP': 'rgb(140, 91, 0)',     # 深棕 (主力吸籌)
-    'LOT_LARGE_DOWN': 'rgb(0, 109, 145)',  # 深藍 (主力調節)
-    
-    # 特大單 (>= 15口): 固定顏色
-    'LOT_MEGA_UP': 'rgb(251, 0, 255)',     # 洋紅 (極端買進 - Neon)
-    'LOT_MEGA_DOWN': 'rgb(0, 255, 255)',   # 青色 (極端賣出 - Neon)
+    # 特大單 (>= 15口)
+    'LOT_MEGA_UP': _C_MAGENTA_NEON,
+    'LOT_MEGA_DOWN': _C_CYAN_NEON,
     
     # 其他填充色
-    'VOLUME_FILL': 'rgba(255, 240, 0, 0.25)' # 半透明亮黃 (成交量)
+    'VOLUME_FILL': _C_YELLOW.replace('rgb', 'rgba').replace(')', ', 0.3)'),
 }
