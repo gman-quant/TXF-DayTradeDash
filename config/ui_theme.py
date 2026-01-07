@@ -122,4 +122,10 @@ UI_COLOR = {
     
     # 其他填充色
     'VOLUME_FILL': _C_YELLOW.replace('rgb', 'rgba').replace(')', ', 0.3)'),
+    
+    # Volume Profile (Buy/Sell)
+    # Visual Stacking: Layer 1 (Total) = Buy Color, Layer 2 (Sell) = Sell Color
+    # Original Colors Swapped: Buy=Red, Sell=Green
+    'VP_BUY': 'rgba(255, 82, 82, 0.25)',    # Red (Original RGB)
+    'VP_SELL': 'rgba(0, 230, 118, 0.1)',  # Green (Original RGB)
 }

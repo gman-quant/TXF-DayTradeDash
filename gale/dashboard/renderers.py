@@ -48,7 +48,7 @@ def add_main_price_chart(fig, data, row=1, col=1):
             # 簡潔版 Tooltip
             hovertemplate=(
                 '<b>%{x|%H:%M:%S}</b><br>' +
-                'H: %{high}<br>C: %{close}<br>O: %{open}<br>L: %{low}<br>' +
+                'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
                 '<extra></extra>' 
             ),
             legendrank=100
@@ -165,14 +165,13 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
         # Layer 1: Total Volume (顯示為 Buy Color, Green)
         fig.add_trace(go.Bar(
             y=prices,
-            x=total_vols,
-            customdata=buy_vols, # 傳入真實 Buy Vol 供 tooltip 顯示正確數值
+            x=sell_vols,
             orientation='h',
             xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
             yaxis='y',
             name='VP Buy Vol',
             width=bin_size * 0.95,
-            marker_color='rgba(0, 230, 118, 0.1)', # 綠色 (加上透明度)
+            marker_color=UI_COLOR['VP_BUY'], # 紅色
             marker_line_width=0,
             hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
@@ -184,13 +183,14 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
         # Layer 2: Sell Volume (顯示為 Sell Color, Red)
         fig.add_trace(go.Bar(
             y=prices,
-            x=sell_vols,
+            x=total_vols,
+            customdata=buy_vols, # 傳入真實 Buy Vol 供 tooltip 顯示正確數值
             orientation='h',
             xaxis='x4',     # [Fix] Use X4
             yaxis='y',
             name='VP Sell Vol',
             width=bin_size * 0.95,
-            marker_color='rgba(255, 82, 82, 0.25)', # 紅色
+            marker_color=UI_COLOR['VP_SELL'], # 綠色 (加上透明度)
             marker_line_width=0,
             hovertemplate='<b>Sell Vol</b>: %{x:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
