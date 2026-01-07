@@ -162,10 +162,10 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
         # 2. 再畫賣量 (紅色)：疊加在總量之上。
         # 視覺效果：[紅色區塊(Sell)][綠色區塊(剩餘的Buy)]
         
-        # Layer 1: Total Volume (顯示為 Buy Color, Green)
+        # Layer 1: Total Volume (顯示為 Buy Color, Red)
         fig.add_trace(go.Bar(
             y=prices,
-            x=sell_vols,
+            x=buy_vols,
             orientation='h',
             xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
             yaxis='y',
@@ -180,11 +180,11 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             legendrank=190
         ))
         
-        # Layer 2: Sell Volume (顯示為 Sell Color, Red)
+        # Layer 2: Sell Volume (顯示為 Sell Color, Green)
         fig.add_trace(go.Bar(
             y=prices,
             x=total_vols,
-            customdata=buy_vols, # 傳入真實 Buy Vol 供 tooltip 顯示正確數值
+            customdata=sell_vols, # 傳入真實 Sell Vol 供 tooltip 顯示正確數值
             orientation='h',
             xaxis='x4',     # [Fix] Use X4
             yaxis='y',
