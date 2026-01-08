@@ -159,6 +159,9 @@ def create_main_layout(max_capacity=200000):
 
             # [Fix] Missing Store caused callback to fail
             dcc.Store(id='scoreboard-state', data={}),
+
+            # [New] Session Static Data Store (PrevClose, Open)
+            dcc.Store(id='session-static-store', data={}),
         ]
     )
 

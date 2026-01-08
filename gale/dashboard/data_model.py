@@ -262,3 +262,44 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
             'val': val
         }
     }
+
+def get_session_static_data(indicator_manager):
+    """
+    [New] 取得盤中固定不變的靜態數據 (Session Open, Prev Close)。
+    修正 Lookback 改變導致 Open 價格浮動的 Bug。
+    """
+    try:
+        rb = indicator_manager.ring_buffer
+        
+        # 1. Prev Close (From Header)
+        # PrevClose is stored in header offset 16
+        prev_close = rb.prev_close
+        
+        # 2. Session Open (True First Tick)
+        # 邏輯：永遠取 RingBuffer 中最早的一筆數據當作開盤價
+        # Case A: Buffer Wrapped (Full) -> Head 指向的是「被覆寫的最老數據」的下一個，即「當前最老數據」
+        # Case B: Buffer Not Full -> Index 0 就是第一筆
+        
+        # Note: indicator_manager.get_linear_snapshot 是複製一份 View
+        # 但我們只需要讀一個數字，直接用 RingBuffer 原生屬性讀取即可 (Zero-copy)
+        
+        open_price = 0.0
+        # Fix: SharedRingBuffer does not have .count, use manager.count or derive from head/is_full
+        current_count = rb.capacity if rb.is_full else rb.head
+        
+        if current_count > 0:
+            if rb.is_full:
+                # 若已滿，head 指向最舊的資料
+                open_price = rb.close[rb.head]
+            else:
+                # 若未滿，0 是起點
+                open_price = rb.close[0]
+                
+        return {
+            'prev_close': prev_close,
+            'open': open_price
+        }
+            
+    except Exception as e:
+        print(f"Error fetching static data: {e}")
+        return {'prev_close': 0, 'open': 0}

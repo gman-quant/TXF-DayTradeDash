@@ -91,10 +91,11 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         [Input('interval-component', 'n_intervals'),
          Input('lookback-slider', 'value'),
          Input('timeframe-dropdown', 'value'),
-         Input('chart-zoom-state', 'data')],
+         Input('chart-zoom-state', 'data'),
+         Input('session-static-store', 'data')],
         [State('last-update-timestamp', 'data')]
     )
-    def update_dashboard(n, lookback_count, timeframe, saved_zoom_range, last_ts_stored):
+    def update_dashboard(n, lookback_count, timeframe, saved_zoom_range, session_static, last_ts_stored):
         """
         定時觸發的主更新函數：
         1. 檢查是否有新數據
@@ -115,6 +116,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             current_latest_ts = indicator_manager.get_latest_timestamp()
 
             # 若由定時器觸發且數據時間未變 -> 跳過運算，節省 CPU
+            # [Optimization] Static store update should trigger refresh regardless of timestamp
             if trigger_id == 'interval-component' and n > 0 and current_latest_ts == last_ts_stored:
                 raise PreventUpdate
 
@@ -146,24 +148,26 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             # --- 4. Scoreboard Calculation (戰情板計算) ---
             hist = data_pack['history']
             
-            # 安全取得 OHLC (避免剛啟動時數據不足)
-            # [New] Get PREV_CLOSE_PRICE from SHM Header
-            try:
-                # ring_buffer is dynamically attached in DashboardRunner
-                shm_prev_close = getattr(indicator_manager, 'ring_buffer', None).prev_close
-                if shm_prev_close and shm_prev_close > 0:
-                    current_prev_close = shm_prev_close
-                else:
-                    current_prev_close = PREV_CLOSE_PRICE
-            except Exception:
+            # [Optimization] Use Cached Static Data (O(1)) instead of re-reading/re-calculating
+            # This also fixes the 'Floating Open Price' bug when lookback changes
+            if session_static and session_static.get('open') is not None:
+                current_prev_close = session_static.get('prev_close', PREV_CLOSE_PRICE)
+                open_p = session_static.get('open', 0)
+                # Fallback if open is 0 (uninitialized)
+                if open_p == 0 and len(hist['close']) > 0:
+                    open_p = hist['close'][0]
+            else:
+                # Initial Fallback (Should rarely happen after first callback)
                 current_prev_close = PREV_CLOSE_PRICE
+                if len(hist['close']) > 0:
+                    open_p = hist['close'][0]
+                else:
+                    open_p = current_prev_close
 
             if len(hist['close']) > 0:
                 last_price = hist['close'][-1]
-                open_p = hist['close'][0]
             else:
                 last_price = current_prev_close
-                open_p = current_prev_close
             
             # 計算漲跌幅
             change = last_price - current_prev_close
@@ -194,6 +198,37 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             # 捕捉未預期錯誤，打印 Traceback 但不讓 Server 崩潰
             print(f"❌ Dash Error: {traceback.format_exc()}")
             return NO_DATA_FIGURE, f"System Error: {str(e)}", no_update
+
+    # =========================================================================
+    # 🧠 Callback 2.5: Static Data Manager (靜態數據快取)
+    # =========================================================================
+    @app.callback(
+        Output('session-static-store', 'data'),
+        Input('interval-component', 'n_intervals'),
+        State('session-static-store', 'data')
+    )
+    def update_static_data(n, current_data):
+        """
+        每秒檢查一次 Static Data，若尚未填入或為 0 則嘗試填入。
+        一旦填入成功，只要 Session 不變，原則上不需更新 (除了換日 resets)。
+        
+        目前邏輯：
+        1. 若 current_data 為空或 open=0 -> 嘗試讀取
+        2. 若 indicator_manager 有重置 (Head rewinds) -> 可能需要重讀?
+           目前簡化：每 N 秒強制 refresh 一次，或者就每秒 check 代價很低。
+        """
+        # 簡單策略：每秒都去 peek 一下。因為只是從 memory 讀兩個 float，開銷極低。
+        # 這樣可以確保若盤中換日 (日盤轉夜盤)，UI 也能自動更新 PrevClose/Open。
+        
+        # 取得靜態數據 (Session Open, Prev Close)
+        from gale.dashboard.data_model import get_session_static_data
+        static_data = get_session_static_data(indicator_manager)
+        
+        # 若數據沒變，不需要觸發 Output update (避免連鎖反應)
+        if current_data == static_data:
+            raise PreventUpdate
+            
+        return static_data
 
     # =========================================================================
     # 📸 Callback 3: Snapshot Export (HTML 存檔)
