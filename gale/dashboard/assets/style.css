@@ -58,3 +58,18 @@ body {
 .Select-input>input {
     color: white !important;
 }
+
+/* =========================================================================
+   Plotly Modebar Customization (Toolbar Position)
+   工具列位置調整
+   ========================================================================= */
+.js-plotly-plot .plotly .modebar {
+    /* 調整 top/right 數值來改變位置 */
+    top: -5px !important;
+    /* 距離頂部 -5px */
+    right: 0px !important;
+    /* 距離右側 0px */
+
+    /* 若要移到左側，請取消註解以下： */
+    /* left: 10px !important; right: auto !important; */
+}

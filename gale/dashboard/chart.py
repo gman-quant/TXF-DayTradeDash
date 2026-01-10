@@ -211,9 +211,10 @@ def build_combined_figure(data):
         
         # --- 3. 圖例設定 (Legend) ---
         legend=dict(
-            orientation="h",       # 水平排列
-            yanchor="bottom", y=1.02, # 位於圖表上方
-            xanchor="center", x=0.5
+            orientation="h",       # 保持水平排列 (Horizontal)
+            yanchor="bottom", y=1.00, 
+            xanchor="left", x=0.01, # [UI Adjustment] 移至左上角，利用標題隱藏後的空間，避開右上角工具列
+            bgcolor="rgba(0,0,0,0)" # 透明背景
         ),
 
         # --- 5. Y 軸配置 (Y-Axes Configuration) ---

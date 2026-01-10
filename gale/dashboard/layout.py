@@ -88,7 +88,7 @@ def create_main_layout(max_capacity=200000):
         children=[
         
             # 1. 標題區 (Header)
-            html.H2("🇹🇼 TXF Gale Quant Engine", style={'textAlign': 'center', 'marginBottom': '5px'}),
+            # html.H2("🇹🇼 TXF Gale Quant Engine", style={'textAlign': 'center', 'marginBottom': '5px'}),
             
             # 2. 戰情面板 (Live Scoreboard)
             # 內容由 Callback 動態注入
@@ -102,7 +102,7 @@ def create_main_layout(max_capacity=200000):
                 
                     # [左側] 週期選擇 (Dropdown)
                     html.Div(style={'width': '150px', 'marginRight': '20px'}, children=[
-                        html.Label("⏱️ Timeframe", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                        # html.Label("⏱️ Timeframe", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Dropdown(
                             id='timeframe-dropdown',
                             options=tf_options,
@@ -114,12 +114,48 @@ def create_main_layout(max_capacity=200000):
 
                     # [右側] 顯示筆數 (Slider)
                     html.Div(style={'flex': '1'}, children=[
-                        html.Label("📊 Lookback Window", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                        # html.Label("📊 Lookback Window", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
                         dcc.Slider(
                             id='lookback-slider',
                             min=start_val, max=slider_max, step=2000, value=slider_max,
                             marks=marks,
                             tooltip={"placement": "bottom", "always_visible": True}
+                        )
+                    ]),
+                    
+                    # [新增] 畫筆粗細設定
+                    html.Div(style={'width': '80px', 'marginLeft': '20px', 'marginRight': '0px'}, children=[
+                        # html.Label("✏️ Width", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                        dcc.Dropdown(
+                            id='drawing-width-dropdown',
+                            options=[
+                                {'label': '1px', 'value': 1},
+                                {'label': '2px', 'value': 2},
+                                {'label': '3px', 'value': 3},
+                                {'label': '5px', 'value': 5},
+                                {'label': '8px', 'value': 8},
+                            ],
+                            value=1, # Default
+                            clearable=False,
+                            style={'fontSize': '12px'}
+                        )
+                    ]),
+                    
+                    # [新增] 畫筆顏色設定
+                    html.Div(style={'width': '80px', 'marginLeft': '10px'}, children=[
+                        # html.Label("🎨 Color", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
+                        dcc.Dropdown(
+                            id='drawing-color-dropdown',
+                            options=[
+                                {'label': '🟡', 'value': '#FFE100'}, # Yellow
+                                {'label': '⚪', 'value': '#FFFFFF'}, # White
+                                {'label': '🔴', 'value': '#FF4136'}, # Red
+                                {'label': '🟢', 'value': '#2ECC40'}, # Green
+                                {'label': '🔵', 'value': '#0074D9'}, # Blue
+                            ],
+                            value='#FFE100', # Default Yellow
+                            clearable=False,
+                            style={'fontSize': '12px'}
                         )
                     ]),
                     
@@ -144,8 +180,19 @@ def create_main_layout(max_capacity=200000):
             dcc.Graph(
                 id='main-chart', 
                 figure=initial_figure, 
-                style={'height': '85vh'}, # 佔據剩餘高度
-                config={'scrollZoom': True, 'displayModeBar': False} 
+                style={'height': '89vh'}, # 佔據剩餘高度
+                config={
+                    'scrollZoom': True, 
+                    'displayModeBar': True,
+                    'modeBarButtonsToAdd': [
+                        'drawline',
+                        # 'drawopenpath',
+                        # 'drawclosedpath',
+                        # 'drawcircle',
+                        'drawrect',
+                        'eraseshape'
+                    ]
+                } 
             ),
 
             # 5. 狀態暫存區 (Hidden Stores & Interval)
@@ -162,6 +209,9 @@ def create_main_layout(max_capacity=200000):
 
             # [New] Session Static Data Store (PrevClose, Open)
             dcc.Store(id='session-static-store', data={}),
+            
+            # [New] Dummy store for clientside callback
+            dcc.Store(id='drawing-config-store', data={}),
         ]
     )
 

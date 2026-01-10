@@ -3,7 +3,7 @@
 import time
 import traceback
 import dash
-from dash import callback_context, no_update
+from dash import dcc, html, callback_context, no_update
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
@@ -43,6 +43,79 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
     app = dash.Dash(__name__)
     # [Dynamic Lookback] Pass max buffer capacity to layout for slider config
     app.layout = create_main_layout(max_capacity=indicator_manager.capacity)
+
+    # [New] Store to track the last user-interacted shape index
+    dcc.Store(id='active-shape-store', data=None),
+
+    # =========================================================================
+    # ⚡ Clientside Callback: Drawing Config & Shape Editing
+    # =========================================================================
+    app.clientside_callback(
+        """
+        function(width, color, relayoutData, currentActiveIndex) {
+            const graph = document.getElementById('main-chart');
+            if (!graph) return window.dash_clientside.no_update;
+            
+            const ctx = dash_clientside.callback_context;
+            const triggered = ctx.triggered.map(t => t.prop_id);
+            
+            // 1. Determine if this call was triggered by a Shape Interaction (Drag/Resize)
+            //    If so, we just want to update our 'active shape index' and do NOTHING else.
+            if (triggered.some(t => t.includes('main-chart.relayoutData'))) {
+                if (!relayoutData) return window.dash_clientside.no_update;
+                
+                // Parse keys like "shapes[2].x0" to extract index "2"
+                let newIndex = null;
+                for (const key in relayoutData) {
+                    if (key.startsWith('shapes[')) {
+                        const match = key.match(/shapes\[(\d+)\]/);
+                        if (match) {
+                            newIndex = parseInt(match[1]);
+                            break; 
+                        }
+                    }
+                }
+                
+                // If we found a shape index, update the store. 
+                // Don't relayout graph (avoid infinite loop).
+                if (newIndex !== null) {
+                    return newIndex; 
+                }
+                return window.dash_clientside.no_update;
+            }
+            
+            // 2. If triggered by Dropdowns (Width/Color), apply style to:
+            //    A. Defaults for NEW shapes (newshape)
+            //    B. The currently ACTIVE shape (if one exists)
+            
+            let update = {
+                'newshape.line.width': width,
+                'newshape.line.color': color
+            };
+            
+            // If we have a valid active shape index, try to update it too
+            // Note: We need to be careful. If the shape was deleted, this might error, but Plotly handles it gracefully usually.
+            if (currentActiveIndex !== null && currentActiveIndex !== undefined) {
+                // Construct dynamic keys for the specific shape
+                update[`shapes[${currentActiveIndex}].line.width`] = width;
+                update[`shapes[${currentActiveIndex}].line.color`] = color;
+            }
+            
+            try {
+                Plotly.relayout(graph, update);
+            } catch (e) {
+                console.error("Relayout Error:", e);
+            }
+            
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('active-shape-store', 'data'),
+        [Input('drawing-width-dropdown', 'value'),
+         Input('drawing-color-dropdown', 'value'),
+         Input('main-chart', 'relayoutData')],
+        [State('active-shape-store', 'data')]
+    )
 
     # =========================================================================
     # 🎮 Callback 1: Viewport & Zoom Management (視野控制)
@@ -92,10 +165,12 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
          Input('lookback-slider', 'value'),
          Input('timeframe-dropdown', 'value'),
          Input('chart-zoom-state', 'data'),
-         Input('session-static-store', 'data')],
+         Input('session-static-store', 'data'),
+         Input('drawing-width-dropdown', 'value'),
+         Input('drawing-color-dropdown', 'value')],
         [State('last-update-timestamp', 'data')]
     )
-    def update_dashboard(n, lookback_count, timeframe, saved_zoom_range, session_static, last_ts_stored):
+    def update_dashboard(n, lookback_count, timeframe, saved_zoom_range, session_static, line_width, line_color, last_ts_stored):
         """
         定時觸發的主更新函數：
         1. 檢查是否有新數據
@@ -138,10 +213,20 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                 # Case B: 無縮放紀錄 (或重置) -> 使用系統計算的最新範圍 (跟隨最新報價)
                 final_range = data_pack.get('default_range')
             
+            # [Debug] Verify drawing config
+            print(f"DEBUG: Applying Drawing Config -> Width: {line_width}, Color: {line_color}")
+
             fig.update_layout(
                 uirevision='constant', # 告訴 Plotly 盡量保留 UI 狀態 (如 Legend 開關)
                 xaxis=dict(
                     range=final_range  # 強制套用我們計算出的範圍
+                ),
+                # [Drawing Config] Apply user settings for new shapes
+                newshape=dict(
+                    line=dict(
+                        color=line_color,
+                        width=line_width
+                    )
                 )
             )
 
