@@ -402,7 +402,16 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                 plot_html = fig.to_html(
                     include_plotlyjs='cdn', 
                     full_html=False, 
-                    config={'scrollZoom': True, 'displayModeBar': True, 'responsive': True}, 
+                    config={
+                        'scrollZoom': True, 
+                        'displayModeBar': True, 
+                        'responsive': True,
+                        'modeBarButtonsToAdd': [
+                            'drawline',
+                            'drawrect',
+                            'eraseshape'
+                        ]
+                    }, 
                     default_height='100%',
                     default_width='100%'
                 )
@@ -508,7 +517,13 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                         .plotly-graph-div {{ 
                             flex: 1; 
                             width: 100%; 
-                            height: 85vh !important; 
+                            height: 87vh !important; 
+                        }}
+
+                        /* [Fix] Modebar Position for Saved HTML */
+                        .js-plotly-plot .plotly .modebar {{
+                            top: -5px !important;
+                            right: 0px !important;
                         }}
                     </style>
                 </head>
