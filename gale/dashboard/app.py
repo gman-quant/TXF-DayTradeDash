@@ -408,6 +408,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                         'responsive': True,
                         'modeBarButtonsToAdd': [
                             'drawline',
+                            'drawcircle',
                             'drawrect',
                             'eraseshape'
                         ]

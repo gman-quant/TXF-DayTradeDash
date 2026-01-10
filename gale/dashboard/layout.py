@@ -188,7 +188,7 @@ def create_main_layout(max_capacity=200000):
                         'drawline',
                         # 'drawopenpath',
                         # 'drawclosedpath',
-                        # 'drawcircle',
+                        'drawcircle',
                         'drawrect',
                         'eraseshape'
                     ]
