@@ -153,7 +153,7 @@ def create_main_layout(max_capacity=200000):
                                 {'label': '🟢', 'value': '#2ECC40'}, # Green
                                 {'label': '🔵', 'value': '#0074D9'}, # Blue
                             ],
-                            value='#FFE100', # Default Yellow
+                            value='#2ECC40', # Default Green
                             clearable=False,
                             style={'fontSize': '12px'}
                         )
