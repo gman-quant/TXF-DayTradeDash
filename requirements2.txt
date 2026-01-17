@@ -6,4 +6,3 @@ numba
 pandas
 polars
 pyarrow
-uvloop
