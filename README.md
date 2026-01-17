@@ -63,10 +63,16 @@ graph LR
 ### 2. 安裝依賴
 
 ```bash
-pip install -r requirements.txt
-```
+python -m venv .venv
 
-*(核心依賴: `confluent-kafka`, `numpy`, `numba`, `dash`, `plotly`, `pandas`, `uvloop`)*
+. .venv/bin/activate # mac
+. .venv/Scripts/activate # win
+
+python.exe -m pip install --upgrade pip
+
+pip install -r requirements.txt # mac
+pip install -r requirement2.txt # win
+```
 
 ### 3. 配置設定
 
@@ -93,7 +99,8 @@ python -m bin.run_supervisor
 指定日期進行歷史數據回放。
 
 ```bash
-python -m bin.run_supervisor --mode history --date 2026-01-01 --session day
+python -m bin.run_supervisor --mode history --date 2026-01-16 --session day
+python -m bin.run_supervisor --mode history --date 2026-01-17 --session night
 ```
 
 ### 3. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]

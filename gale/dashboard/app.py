@@ -1,18 +1,14 @@
 # analysis/dashboard_server.py
 
-import time
 import traceback
 import dash
-from dash import dcc, html, callback_context, no_update
+from dash import dcc, callback_context, no_update
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 # --- Local Modules ---
 from gale.dashboard.layout import create_main_layout, create_scoreboard_html
-from gale.dashboard.controller import (
-    process_market_data, 
-    build_combined_figure
-)
+from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.chart import create_blank_figure
 from gale.dashboard.data_model import get_last_value
 from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
@@ -28,16 +24,17 @@ except ImportError:
 # 🚀 Dashboard Server Entry Point
 # =============================================================================
 
+
 def start_dashboard_server(indicator_manager, port=8050, args=None):
     """
     啟動 Dash 儀表板伺服器。
     整合 Layout、Logic 與 Callbacks，負責即時數據的前後端交互。
-    
+
     Args:
         indicator_manager: 數據核心 (RingBuffer Manager)
         port: 服務端口 (Default: 8050)
     """
-    
+
     # 初始化空白圖表 (用於錯誤或無數據時顯示)
     NO_DATA_FIGURE = create_blank_figure()
 
@@ -46,7 +43,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
     app.layout = create_main_layout(max_capacity=indicator_manager.capacity)
 
     # [New] Store to track the last user-interacted shape index
-    dcc.Store(id='active-shape-store', data=None),
+    (dcc.Store(id="active-shape-store", data=None),)
 
     # =========================================================================
     # ⚡ Clientside Callback: Drawing Config & Shape Editing
@@ -111,19 +108,20 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             return window.dash_clientside.no_update;
         }
         """,
-        Output('active-shape-store', 'data'),
-        [Input('drawing-width-dropdown', 'value'),
-         Input('drawing-color-dropdown', 'value'),
-         Input('main-chart', 'relayoutData')],
-        [State('active-shape-store', 'data')]
+        Output("active-shape-store", "data"),
+        [
+            Input("drawing-width-dropdown", "value"),
+            Input("drawing-color-dropdown", "value"),
+            Input("main-chart", "relayoutData"),
+        ],
+        [State("active-shape-store", "data")],
     )
 
     # =========================================================================
     # 🎮 Callback 1: Viewport & Zoom Management (視野控制)
     # =========================================================================
     @app.callback(
-        Output('chart-zoom-state', 'data'),
-        Input('main-chart', 'relayoutData')
+        Output("chart-zoom-state", "data"), Input("main-chart", "relayoutData")
     )
     def save_zoom_state(relayoutData):
         """
@@ -132,46 +130,59 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         """
         if not relayoutData:
             raise PreventUpdate
-            
+
         # 1. 處理自動縮放/重置 (Autoscale / Reset Axes)
         # 當使用者雙擊圖表重置時，清空儲存狀態 -> 回歸系統自動跟隨
-        if 'xaxis.autorange' in relayoutData or 'autosize' in relayoutData:
+        if "xaxis.autorange" in relayoutData or "autosize" in relayoutData:
             return None
 
         # 2. 捕捉 X 軸範圍 (Pan / Zoom)
         # Plotly 的 relayoutData 格式可能不同，需多重判斷
         x_min, x_max = None, None
 
-        if 'xaxis.range[0]' in relayoutData and 'xaxis.range[1]' in relayoutData:
-            x_min = relayoutData['xaxis.range[0]']
-            x_max = relayoutData['xaxis.range[1]']
-        elif 'xaxis.range' in relayoutData:
-            x_min = relayoutData['xaxis.range'][0]
-            x_max = relayoutData['xaxis.range'][1]
+        if "xaxis.range[0]" in relayoutData and "xaxis.range[1]" in relayoutData:
+            x_min = relayoutData["xaxis.range[0]"]
+            x_max = relayoutData["xaxis.range[1]"]
+        elif "xaxis.range" in relayoutData:
+            x_min = relayoutData["xaxis.range"][0]
+            x_max = relayoutData["xaxis.range"][1]
 
         if x_min is not None and x_max is not None:
             return [x_min, x_max]
-            
+
         raise PreventUpdate
 
     # =========================================================================
     # 🔄 Callback 2: Core Dashboard Update Loop (核心更新循環)
     # =========================================================================
     @app.callback(
-        [Output('main-chart', 'figure'),
-         Output('live-status-panel', 'children'),
-         Output('last-update-timestamp', 'data'),
-         Output('scoreboard-state', 'data')],
-        [Input('interval-component', 'n_intervals'),
-         Input('lookback-slider', 'value'),
-         Input('timeframe-dropdown', 'value'),
-         Input('chart-zoom-state', 'data'),
-         Input('session-static-store', 'data'),
-         Input('drawing-width-dropdown', 'value'),
-         Input('drawing-color-dropdown', 'value')],
-        [State('last-update-timestamp', 'data')]
+        [
+            Output("main-chart", "figure"),
+            Output("live-status-panel", "children"),
+            Output("last-update-timestamp", "data"),
+            Output("scoreboard-state", "data"),
+        ],
+        [
+            Input("interval-component", "n_intervals"),
+            Input("lookback-slider", "value"),
+            Input("timeframe-dropdown", "value"),
+            Input("chart-zoom-state", "data"),
+            Input("session-static-store", "data"),
+            Input("drawing-width-dropdown", "value"),
+            Input("drawing-color-dropdown", "value"),
+        ],
+        [State("last-update-timestamp", "data")],
     )
-    def update_dashboard(n, lookback_count, timeframe, saved_zoom_range, session_static, line_width, line_color, last_ts_stored):
+    def update_dashboard(
+        n,
+        lookback_count,
+        timeframe,
+        saved_zoom_range,
+        session_static,
+        line_width,
+        line_color,
+        last_ts_stored,
+    ):
         """
         定時觸發的主更新函數：
         1. 檢查是否有新數據
@@ -181,7 +192,11 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         """
         try:
             ctx = callback_context
-            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else 'interval-component'
+            trigger_id = (
+                ctx.triggered[0]["prop_id"].split(".")[0]
+                if ctx.triggered
+                else "interval-component"
+            )
 
             # --- 1. Early Peek (效能優化) ---
             # 如果 RingBuffer 為空，顯示等待訊息
@@ -193,18 +208,24 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
 
             # 若由定時器觸發且數據時間未變 -> 跳過運算，節省 CPU
             # [Optimization] Static store update should trigger refresh regardless of timestamp
-            if trigger_id == 'interval-component' and n > 0 and current_latest_ts == last_ts_stored:
+            if (
+                trigger_id == "interval-component"
+                and n > 0
+                and current_latest_ts == last_ts_stored
+            ):
                 raise PreventUpdate
 
             # --- 2. Data Processing (數據處理) ---
-            data_pack = process_market_data(indicator_manager, lookback_count, timeframe)
-            
+            data_pack = process_market_data(
+                indicator_manager, lookback_count, timeframe
+            )
+
             if not data_pack:
                 return NO_DATA_FIGURE, "Processing Error...", no_update, no_update
-            
+
             # --- 3. Figure Generation (圖表繪製) ---
             fig = build_combined_figure(data_pack)
-            
+
             # [Zoom Persistence Logic]
             # 決定最終使用的 X 軸範圍
             if saved_zoom_range:
@@ -212,65 +233,62 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                 final_range = saved_zoom_range
             else:
                 # Case B: 無縮放紀錄 (或重置) -> 使用系統計算的最新範圍 (跟隨最新報價)
-                final_range = data_pack.get('default_range')
-            
+                final_range = data_pack.get("default_range")
+
             # [Debug] Verify drawing config
-            print(f"DEBUG: Applying Drawing Config -> Width: {line_width}, Color: {line_color}")
+            # print(f"DEBUG: Applying Drawing Config -> Width: {line_width}, Color: {line_color}")
 
             fig.update_layout(
-                uirevision='constant', # 告訴 Plotly 盡量保留 UI 狀態 (如 Legend 開關)
+                uirevision="constant",  # 告訴 Plotly 盡量保留 UI 狀態 (如 Legend 開關)
                 xaxis=dict(
                     range=final_range  # 強制套用我們計算出的範圍
                 ),
                 # [Drawing Config] Apply user settings for new shapes
-                newshape=dict(
-                    line=dict(
-                        color=line_color,
-                        width=line_width
-                    )
-                )
+                newshape=dict(line=dict(color=line_color, width=line_width)),
             )
 
             # --- 4. Scoreboard Calculation (戰情板計算) ---
-            hist = data_pack['history']
-            
+            hist = data_pack["history"]
+
             # [Optimization] Use Cached Static Data (O(1)) instead of re-reading/re-calculating
             # This also fixes the 'Floating Open Price' bug when lookback changes
-            if session_static and session_static.get('open') is not None:
-                current_prev_close = session_static.get('prev_close', PREV_CLOSE_PRICE)
-                open_p = session_static.get('open', 0)
+            if session_static and session_static.get("open") is not None:
+                current_prev_close = session_static.get("prev_close", PREV_CLOSE_PRICE)
+                open_p = session_static.get("open", 0)
                 # Fallback if open is 0 (uninitialized)
-                if open_p == 0 and len(hist['close']) > 0:
-                    open_p = hist['close'][0]
+                if open_p == 0 and len(hist["close"]) > 0:
+                    open_p = hist["close"][0]
             else:
                 # Initial Fallback (Should rarely happen after first callback)
                 current_prev_close = PREV_CLOSE_PRICE
-                if len(hist['close']) > 0:
-                    open_p = hist['close'][0]
+                if len(hist["close"]) > 0:
+                    open_p = hist["close"][0]
                 else:
                     open_p = current_prev_close
 
-            if len(hist['close']) > 0:
-                last_price = hist['close'][-1]
+            if len(hist["close"]) > 0:
+                last_price = hist["close"][-1]
             else:
                 last_price = current_prev_close
-            
+
             # 計算漲跌幅
             change = last_price - current_prev_close
-            change_pct = (change / current_prev_close * 100) if current_prev_close else 0
+            change_pct = (
+                (change / current_prev_close * 100) if current_prev_close else 0
+            )
 
             # 準備數據包供 HTML 生成
             sb_data = {
-                'last_price': last_price,
-                'change': change,
-                'change_pct': change_pct,
-                'open_price': open_p,
-                'high': get_last_value(hist, 'Session_High'),
-                'low': get_last_value(hist, 'Session_Low'),
-                'vol': get_last_value(hist, 'Total_Vol'),
-                'vwap': get_last_value(hist, 'VWAP'),
-                'prev_close': current_prev_close,
-                'underlying_price': get_last_value(hist, 'Underlying_Price')
+                "last_price": last_price,
+                "change": change,
+                "change_pct": change_pct,
+                "open_price": open_p,
+                "high": get_last_value(hist, "Session_High"),
+                "low": get_last_value(hist, "Session_Low"),
+                "vol": get_last_value(hist, "Total_Vol"),
+                "vwap": get_last_value(hist, "VWAP"),
+                "prev_close": current_prev_close,
+                "underlying_price": get_last_value(hist, "Underlying_Price"),
             }
 
             scoreboard = create_scoreboard_html(**sb_data)
@@ -289,15 +307,15 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
     # 🧠 Callback 2.5: Static Data Manager (靜態數據快取)
     # =========================================================================
     @app.callback(
-        Output('session-static-store', 'data'),
-        Input('interval-component', 'n_intervals'),
-        State('session-static-store', 'data')
+        Output("session-static-store", "data"),
+        Input("interval-component", "n_intervals"),
+        State("session-static-store", "data"),
     )
     def update_static_data(n, current_data):
         """
         每秒檢查一次 Static Data，若尚未填入或為 0 則嘗試填入。
         一旦填入成功，只要 Session 不變，原則上不需更新 (除了換日 resets)。
-        
+
         目前邏輯：
         1. 若 current_data 為空或 open=0 -> 嘗試讀取
         2. 若 indicator_manager 有重置 (Head rewinds) -> 可能需要重讀?
@@ -305,15 +323,16 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         """
         # 簡單策略：每秒都去 peek 一下。因為只是從 memory 讀兩個 float，開銷極低。
         # 這樣可以確保若盤中換日 (日盤轉夜盤)，UI 也能自動更新 PrevClose/Open。
-        
+
         # 取得靜態數據 (Session Open, Prev Close)
         from gale.dashboard.data_model import get_session_static_data
+
         static_data = get_session_static_data(indicator_manager)
-        
+
         # 若數據沒變，不需要觸發 Output update (避免連鎖反應)
         if current_data == static_data:
             raise PreventUpdate
-            
+
         return static_data
 
     # =========================================================================
@@ -322,9 +341,8 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
     @app.callback(
         Output("download-snapshot", "data"),
         Input("btn-snapshot", "n_clicks"),
-        [State("main-chart", "figure"),
-         State("scoreboard-state", "data")],
-        prevent_initial_call=True
+        [State("main-chart", "figure"), State("scoreboard-state", "data")],
+        prevent_initial_call=True,
     )
     def export_html_snapshot(n_clicks, fig_data, sb_data):
         """
@@ -333,33 +351,36 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         """
         if not fig_data or n_clicks is None:
             raise PreventUpdate
-            
+
         import plotly.graph_objects as go
         from datetime import datetime, timedelta
-        
+
         try:
             # 1. Sanitize Data (Fix: Remove 'yaxisN' keys from rangeslider causing ValueError)
             # Plotly.js sometimes sends back rangeslider state with invalid keys like 'yaxis6'
-            if 'layout' in fig_data:
-                layout = fig_data['layout']
+            if "layout" in fig_data:
+                layout = fig_data["layout"]
                 # Iterate over all keys that might be x-axes (xaxis, xaxis2, xaxis3...)
                 for key in layout:
-                    if key.startswith('xaxis'):
+                    if key.startswith("xaxis"):
                         axis = layout[key]
-                        if isinstance(axis, dict) and 'rangeslider' in axis:
-                            rs = axis['rangeslider']
+                        if isinstance(axis, dict) and "rangeslider" in axis:
+                            rs = axis["rangeslider"]
                             if isinstance(rs, dict):
-                                keys_to_remove = [k for k in rs.keys() if k.startswith('yaxis') and k != 'yaxis']
+                                keys_to_remove = [
+                                    k
+                                    for k in rs.keys()
+                                    if k.startswith("yaxis") and k != "yaxis"
+                                ]
                                 for k in keys_to_remove:
                                     del rs[k]
 
             # 2. 重建 Figure 物件
             fig = go.Figure(fig_data)
-            
+
             # 3. 生成檔名 (Session Logic)
             now = datetime.now()
-            ts_str = now.strftime('%Y-%m-%d %H:%M:%S') # [Fix] Define ts_str for HTML template
-            
+
             # ┌──────────────────────────────────────────────────────────────────┐
             # │ 檔案命名邏輯 (Filename Logic) - 依據交易日 (Trade Date)              │
             # │ ---------------------------------------------------------------- │
@@ -367,89 +388,93 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             # │ 2. Night Session (15:00~05:00) -> T+1日 (e.g., "2023-10-02-n")   │
             # │    (夜盤交易歸屬於「次一交易日」)                                     │
             # └──────────────────────────────────────────────────────────────────┘
-            
+
             # [Mode A] History Replay
-            if args and args.mode == 'history' and args.date:
+            if args and args.mode == "history" and args.date:
                 date_str = args.date
-                suffix = '-n' if args.session == 'night' else ''
+                suffix = "-n" if args.session == "night" else ""
 
             # [Mode B] Live / Forward Test
             # Case 1: 凌晨 (00:00 ~ 08:45) -> 仍屬於夜盤 (Trade Date = Today)
             # 例如: 10/02 04:00 -> 屬於 10/02 的夜盤 (接續 10/01 15:00 開盤的場次)
             elif now.time() < DAY_SESSION_START:
-                date_str = now.strftime('%Y-%m-%d')
-                suffix = '-n'
-                
+                date_str = now.strftime("%Y-%m-%d")
+                suffix = "-n"
+
             # Case 2: 下午/晚上 (15:00 ~ 23:59) -> 屬於「隔日」夜盤 (Trade Date = Tomorrow)
             # 例如: 10/01 20:00 -> 歸屬為 10/02 的夜盤
             elif now.time() >= NIGHT_SESSION_START:
-                date_str = (now + timedelta(days=1)).strftime('%Y-%m-%d')
-                suffix = '-n'
-                
+                date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+                suffix = "-n"
+
             # Case 3: 日盤 (08:45 ~ 13:45) -> 屬於今日日盤
             else:
-                date_str = now.strftime('%Y-%m-%d')
-                suffix = ''
-                
+                date_str = now.strftime("%Y-%m-%d")
+                suffix = ""
+
             filename = f"TXF-Chart-{date_str}{suffix}.html"
-            
+
             # 3. 建構 HTML 內容 (Header + Plot)
             def write_full_html():
                 # [Revert] 回復為全黑模式 (Dark Theme)
                 # 強制設定圖表高度與 RWD
                 fig.layout.height = None
                 fig.layout.autosize = True
-                
+
                 plot_html = fig.to_html(
-                    include_plotlyjs='cdn', 
-                    full_html=False, 
+                    include_plotlyjs="cdn",
+                    full_html=False,
                     config={
-                        'scrollZoom': True, 
-                        'displayModeBar': True, 
-                        'responsive': True,
-                        'modeBarButtonsToAdd': [
-                            'drawline',
-                            'drawcircle',
-                            'drawrect',
-                            'eraseshape'
-                        ]
-                    }, 
-                    default_height='100%',
-                    default_width='100%'
+                        "scrollZoom": True,
+                        "displayModeBar": True,
+                        "responsive": True,
+                        "modeBarButtonsToAdd": [
+                            "drawline",
+                            "drawcircle",
+                            "drawrect",
+                            "eraseshape",
+                        ],
+                    },
+                    default_height="100%",
+                    default_width="100%",
                 )
-                
+
                 # B. 產生 Scoreboard HTML (完整版)
                 if not sb_data:
-                    header_html = "<div style='color:white; text-align:center'>No Data</div>"
+                    header_html = (
+                        "<div style='color:white; text-align:center'>No Data</div>"
+                    )
                 else:
                     # --- 數據準備 ---
-                    price = sb_data.get('last_price', 0)
-                    change = sb_data.get('change', 0)
-                    pct = sb_data.get('change_pct', 0)
-                    vol = sb_data.get('vol', 0)
-                    high = sb_data.get('high', 0)
-                    low = sb_data.get('low', 0)
-                    prev_close = sb_data.get('prev_close', 0)
-                    open_p = sb_data.get('open_price', 0)
-                    vwap = sb_data.get('vwap', 0)
-                    u_price = sb_data.get('underlying_price', 0)
-                    
+                    price = sb_data.get("last_price", 0)
+                    change = sb_data.get("change", 0)
+                    pct = sb_data.get("change_pct", 0)
+                    vol = sb_data.get("vol", 0)
+                    high = sb_data.get("high", 0)
+                    low = sb_data.get("low", 0)
+                    prev_close = sb_data.get("prev_close", 0)
+                    open_p = sb_data.get("open_price", 0)
+                    vwap = sb_data.get("vwap", 0)
+                    u_price = sb_data.get("underlying_price", 0)
+
                     # --- 邏輯計算 (Dark Mode) ---
-                    main_color = UI_COLOR['UP'] if change >= 0 else UI_COLOR['DOWN']
-                    sign = '+' if change >= 0 else ''
-                    
+                    main_color = UI_COLOR["UP"] if change >= 0 else UI_COLOR["DOWN"]
+                    sign = "+" if change >= 0 else ""
+
                     gap = open_p - prev_close
-                    gap_color = UI_COLOR['UP'] if gap >= 0 else UI_COLOR['DOWN']
-                    gap_sign = '+' if gap >= 0 else ''
-                    
+                    gap_color = UI_COLOR["UP"] if gap >= 0 else UI_COLOR["DOWN"]
+                    gap_sign = "+" if gap >= 0 else ""
+
                     basis = price - u_price
-                    basis_color = UI_COLOR['HIGHLIGHT']
-                    basis_sign = '+' if basis >= 0 else ''
-                    
+                    basis_color = UI_COLOR["HIGHLIGHT"]
+                    basis_sign = "+" if basis >= 0 else ""
+
                     chg_open = price - open_p
-                    chg_open_color = UI_COLOR['UP'] if chg_open >= 0 else UI_COLOR['DOWN']
-                    chg_open_sign = '+' if chg_open >= 0 else ''
-                    
+                    chg_open_color = (
+                        UI_COLOR["UP"] if chg_open >= 0 else UI_COLOR["DOWN"]
+                    )
+                    chg_open_sign = "+" if chg_open >= 0 else ""
+
                     day_range = high - low
 
                     # --- HTML 模板 (Dark Context) ---
@@ -467,34 +492,34 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                             
                             <!-- Col 1: Range (波動邊界) -->
                             <div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">High:</span><span style="color:{UI_COLOR['UP']}; font-weight:bold;">{high:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low:</span><span style="color:{UI_COLOR['DOWN']}; font-weight:bold;">{low:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range:</span><span style="color:{UI_COLOR['HIGHLIGHT']}; font-weight:bold;">{day_range:.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">High:</span><span style="color:{UI_COLOR["UP"]}; font-weight:bold;">{high:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low:</span><span style="color:{UI_COLOR["DOWN"]}; font-weight:bold;">{low:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range:</span><span style="color:{UI_COLOR["HIGHLIGHT"]}; font-weight:bold;">{day_range:.0f}</span></div>
                             </div>
 
                             <!-- Col 2: Context (市場參照) -->
                             <div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:{UI_COLOR['TEXT_SUB']};">{prev_close:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot:</span><span style="color:{UI_COLOR['TEXT_MAIN']};">{u_price:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:{UI_COLOR["TEXT_SUB"]};">{prev_close:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{u_price:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
                             </div>
 
                             <!-- Col 3: Opening (開盤動態) -->
                             <div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open:</span><span style="color:{UI_COLOR['TEXT_MAIN']};">{open_p:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{open_p:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
                             </div>
 
                             <!-- Col 4: Cost & Volume (量價結構) -->
                             <div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:{UI_COLOR['VWAP']}; font-weight:bold;">{vwap:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR['TEXT_SUB']}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume:</span><span style="color:{UI_COLOR['TEXT_MAIN']};">{vol:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:{UI_COLOR["VWAP"]}; font-weight:bold;">{vwap:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{vol:,.0f}</span></div>
                             </div>
                         </div>
                     </div>
                     """
-                    
+
                 return f"""
                 <!DOCTYPE html>
                 <html>
@@ -530,25 +555,25 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                     </style>
                 </head>
                 <body>
-                    <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {'🌙' if suffix else '☀️'}</h2>
+                    <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {"🌙" if suffix else "☀️"}</h2>
                     {header_html}
                     {plot_html}
                 </body>
                 </html>
                 """
-                
+
             return dict(content=write_full_html(), filename=filename)
 
-        except Exception as e:
+        except Exception:
             # 捕獲所有異常並輸出到控制台
             error_msg = traceback.format_exc()
             print(f"❌ Save HTML Error: {error_msg}")
-            
+
             # 回傳錯誤日誌檔案給使用者，而不是無反應
             return dict(
                 content=f"Error exporting HTML snapshot:\n\n{error_msg}",
-                filename="snapshot_error.txt"
+                filename="snapshot_error.txt",
             )
 
     # 啟動 Flask Server
-    app.run(debug=False, port=port, host='0.0.0.0', use_reloader=False)
+    app.run(debug=False, port=port, host="0.0.0.0", use_reloader=False)
