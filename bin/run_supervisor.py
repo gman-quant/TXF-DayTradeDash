@@ -294,6 +294,11 @@ class CoreSupervisor:
             # 1. Start Ingestion Subprocess
             self.start_ingestion()
 
+            # [Fix] Wait for Ingestion to initialize Shared Memory and unlink old resource
+            # This prevents Dashboard from attaching to "zombie" memory.
+            logger.info("⏳ Waiting 3s for Ingestion Server to initialize memory...")
+            time.sleep(3)
+
             # 2. Start Dashboard Subprocess
             self.start_dashboard()
 
@@ -333,6 +338,15 @@ class CoreSupervisor:
                             f"❌ Dashboard Process 異常崩潰！Return Code: {d_ret}"
                         )
                         sys.exit(1)
+
+                # [Graceful Shutdown] Check for restart signal
+                if os.path.exists(".restart_signal"):
+                    logger.info("♻️ 收到重啟信號 (.restart_signal)，正在執行優雅退場...")
+                    try:
+                        os.remove(".restart_signal")
+                    except Exception:
+                        pass
+                    break  # Break loop to trigger finally: cleanup()
 
         except KeyboardInterrupt:
             logger.info("Supervisor 收到 Ctrl+C (KeyboardInterrupt)。")
