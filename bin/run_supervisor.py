@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gale.utils.log_utils import setup_logger
 from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
 from gale.infra.db import load_prev_close
+from config.settings import DATA_ROOT
 
 # Logging
 logger = setup_logger("Supervisor")
@@ -28,25 +29,13 @@ def resolve_parquet_path(date_str, symbol):
         year = dt.strftime("%Y")
         month = dt.strftime("%m")
 
-        # [Fix] Dynamic Path Resolution
-        # Structure: .../Projects/txf-gale-engine <-> .../Projects/txf-data-lake
-        try:
-            # bin/run_supervisor.py -> bin -> txf-gale-engine
-            PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            PARENT_DIR = os.path.dirname(PROJECT_ROOT)
-            DATA_LAKE_DIR = os.path.join(PARENT_DIR, "txf-data-lake")
-
-            if os.path.exists(DATA_LAKE_DIR):
-                DATA_LAKE_ROOT = os.path.join(DATA_LAKE_DIR, "data", "raw_ticks")
-            else:
-                # Fallback
-                DATA_LAKE_ROOT = "/Users/gtai/Projects/txf-data-lake/data/raw_ticks"
-                logger.warning(
-                    f"⚠️ Data Lake detection failed. Using fallback: {DATA_LAKE_ROOT}"
-                )
-
-        except Exception:
-            DATA_LAKE_ROOT = "/Users/gtai/Projects/txf-data-lake/data/raw_ticks"
+        # [Fix] Use centralized DATA_ROOT
+        DATA_LAKE_ROOT = os.path.join(DATA_ROOT, "raw_ticks")
+        
+        if not os.path.exists(DATA_LAKE_ROOT):
+             logger.warning(
+                f"⚠️ Data Lake root not found: {DATA_LAKE_ROOT}"
+            )
 
         path = f"{DATA_LAKE_ROOT}/{symbol}/{year}/{month}/{date_str}_{symbol}_ticks.parquet"
         logger.info(f"🔍 Resolving {symbol} {date_str} -> {path}")

@@ -1,5 +1,8 @@
 # config/settings.py
 
+# 設定資料根目錄
+DATA_ROOT = "D:/txf-data"
+
 # 設定昨收價 (請根據每日實際狀況更新，或未來接 API 自動抓)
 PREV_CLOSE_PRICE = 28220.0
 

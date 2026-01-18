@@ -5,25 +5,17 @@ gale/infra/db.py
 """
 
 import duckdb
+import os
+from datetime import datetime
 from gale.utils.log_utils import setup_logger
+from config.settings import DATA_ROOT
 
 logger = setup_logger("InfraDB")
 
 
 def load_history_data(parquet_path, date_str, session="day"):
     """
-    從 Parquet 載入指定日期的歷史 Tick 資料。
-
-    [Note] 此函式目前保留給未來「回測系統 (Backtest)」或是手動分析使用。
-    即時交易 (Live Mode) 啟動時，數據主要由 Ingestion Server 寫入 Shared Memory，不透過此讀取。
-
-    Args:
-        parquet_path: Parquet 檔案路徑
-        date_str: 日期字串 (YYYY-mm-dd)
-        session: 'day' (日盤) or 'night' (夜盤)
-
-    Returns:
-        pd.DataFrame or None
+    從 Parquet 載入指定日期的歷史 Tick 資料 (DuckDB Version)。
     """
     logger.info(f"Connecting to DuckDB for {parquet_path}...")
     con = None
@@ -65,39 +57,22 @@ def load_history_data(parquet_path, date_str, session="day"):
 def load_prev_close(target_date_str, op="<"):
     """
     從日 Summary Parquet (TXF_1d_YYYY.parquet) 取得參考用「昨收價」。
-
-    此函數同時支援 Live 與 History 模式：
-    - Live Mode: 根據當下時間找尋最近收盤價 (日盤找昨日，夜盤找今日)。
-    - History Mode: 根據回測日期 (target_date) 往前找尋最近的收盤價作為 P&L 計算基準。
-
-    Logic:
-    1. 搜尋當年度與前一年度的 Parquet (跨年支援)。
-    2. 使用 SQL 查詢 "Date {op} target_date" 且 "Session='day'"。
-    3. 排序 (ORDER BY Date DESC) 取最新一筆 (LIMIT 1)，自動跳過假日。
+    (DuckDB Implementation)
     """
-    import os
-    from datetime import datetime
-
     try:
         target_dt = datetime.strptime(target_date_str, "%Y-%m-%d")
         years_to_check = [target_dt.year, target_dt.year - 1]
 
         for year in years_to_check:
-            # [Fix] Dynamic Path Resolution
-            # gale/infra/db.py -> infra -> gale -> txf-gale-engine
-            PROJECT_ROOT = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            )
-            PARENT_DIR = os.path.dirname(PROJECT_ROOT)
-            DATA_LAKE_DIR = os.path.join(PARENT_DIR, "txf-data-lake")
-
-            if os.path.exists(DATA_LAKE_DIR):
-                BASE_PATH = os.path.join(DATA_LAKE_DIR, "data", "kbars", "1d", "TXF")
-            else:
-                BASE_PATH = "/Users/gtai/Projects/txf-data-lake/data/kbars/1d/TXF"
+            # [Fix] Use centralized DATA_ROOT from config
+            BASE_PATH = os.path.join(DATA_ROOT, "kbars", "1d", "TXF")
+            
+            if not os.path.exists(BASE_PATH):
                 logger.warning(
-                    f"⚠️ Data Lake detection failed (db.py). Using fallback: {BASE_PATH}"
+                    f"⚠️ Data path not found: {BASE_PATH}"
                 )
+                continue
+
             parquet_path = f"{BASE_PATH}/TXF_1d_{year}.parquet"
 
             if not os.path.exists(parquet_path):

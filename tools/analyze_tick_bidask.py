@@ -10,8 +10,14 @@
 
 import polars as pl
 import sys
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# Fix ModuleNotFoundError for starting from tools/
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config.settings import DATA_ROOT
 
 def analyze_tick_bidask_correspondence(date_str: str, session: str = 'day'):
     """
@@ -27,7 +33,8 @@ def analyze_tick_bidask_correspondence(date_str: str, session: str = 'day'):
     year = dt.strftime("%Y")
     month = dt.strftime("%m")
     
-    data_lake_root = "/Users/gtai/Projects/txf-data-lake/data/raw_ticks"
+    # [Fix] Use centralized DATA_ROOT
+    data_lake_root = f"{DATA_ROOT}/raw_ticks"
     
     tick_path = f"{data_lake_root}/TXF/{year}/{month}/{date_str}_TXF_ticks.parquet"
     bidask_path = f"{data_lake_root}/TXF/{year}/{month}/{date_str}_TXF_bidask.parquet"

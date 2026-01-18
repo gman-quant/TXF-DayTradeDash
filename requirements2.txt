@@ -4,5 +4,5 @@ duckdb
 grpcio-tools
 numba
 pandas
-polars
+polars[rtcompat]
 pyarrow

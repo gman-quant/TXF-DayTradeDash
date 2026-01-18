@@ -71,7 +71,7 @@ python -m venv .venv
 python.exe -m pip install --upgrade pip
 
 pip install -r requirements.txt # mac
-pip install -r requirement2.txt # win
+pip install -r requirements2.txt # win
 ```
 
 ### 3. 配置設定
