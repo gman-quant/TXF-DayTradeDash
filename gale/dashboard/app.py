@@ -18,7 +18,7 @@ from config.ui_theme import UI_COLOR
 try:
     from config.settings import PREV_CLOSE_PRICE
 except ImportError:
-    PREV_CLOSE_PRICE = 23000.0
+    PREV_CLOSE_PRICE = 30000.0
 
 # =============================================================================
 # 🚀 Dashboard Server Entry Point
