@@ -56,6 +56,11 @@ class CoreSupervisor:
         self.ingest_process = None
         self.strategy_server = None
         self.dash_process = None
+        
+        # [Unique Run ID] Generate a unique ID for this execution session
+        # Format: timestamp (compact)
+        self.run_id = datetime.now().strftime("%H%M%S")
+        logger.info(f"🆔 Session Run ID: {self.run_id}")
 
     def _load_prev_close(self, target_date_str=None):
         """
@@ -191,6 +196,9 @@ class CoreSupervisor:
             cmd.extend(["--capacity", str(calc_capacity)])
             cmd.extend(["--topic", self.args.topic])
             cmd.extend(["--speed", str(self.args.speed)])
+            
+            # [Unique Run ID]
+            cmd.extend(["--run-id", self.run_id])
 
             logger.info(f"Starting Ingestion Process: {' '.join(cmd)}")
             self.ingest_process = subprocess.Popen(cmd)
@@ -212,6 +220,8 @@ class CoreSupervisor:
                 self.args.topic,
                 "--prev-close",
                 str(prev_close),
+                "--run-id",
+                self.run_id,
             ]
 
             if self.args.mode == "history":
@@ -264,6 +274,9 @@ class CoreSupervisor:
             cmd.extend(["--mode", self.args.mode])
         if getattr(self.args, "date", None):
             cmd.extend(["--date", self.args.date])
+
+        # [Unique Run ID]
+        cmd.extend(["--run-id", self.run_id])
 
         # 使用我們剛剛動態判定的 current_session
         cmd.extend(["--session", current_session])

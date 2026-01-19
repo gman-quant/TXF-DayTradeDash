@@ -36,12 +36,12 @@ set /p "speed_input=Speed (1=Realtime, 10=10x, 0=Max [Enter]): "
 
 echo.
 echo --------------------------------------------------------
-echo Running: python -m bin.run_supervisor --mode history --date %target_date% --session %session_input% --source %source_input% --speed %speed_input% --topic txf-replay
+echo Running: python -m bin.run_supervisor --mode history --date %target_date% --session %session_input% --source %source_input% --speed %speed_input%
 echo --------------------------------------------------------
 echo.
 
 REM using the venv python directly
-.venv\Scripts\python.exe -m bin.run_supervisor --mode history --date %target_date% --session %session_input% --source %source_input% --speed %speed_input% --topic txf-replay
+.venv\Scripts\python.exe -m bin.run_supervisor --mode history --date %target_date% --session %session_input% --source %source_input% --speed %speed_input%
 
 echo.
 goto loop

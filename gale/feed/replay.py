@@ -20,7 +20,7 @@ except ImportError:
     logger.error("❌ Polars not installed. Please run: pip install polars")
     sys.exit(1)
 
-def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=200000, prev_close=0.0):
+def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=200000, prev_close=0.0, run_id=None):
     """
     Parquet 回放器主邏輯 (Multi-Day Support)
     Args:
@@ -29,6 +29,8 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
         speed_factor: 回放速度
         underlying_files: 加權指數 Parquet 檔列表 (Optional)
         capacity: RingBuffer 容量
+        prev_close: Reference Price
+        run_id: Unique Execution ID
     """
     
     # 1. 載入數據 (TXF) - Multi-File Support
@@ -163,7 +165,10 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
             logger.warning(f"Failed to merge underlying data: {e}")
 
     # 2. 初始化 Shared Memory
-    shm_name = f"gale_shm_{topic}"
+    if run_id:
+        shm_name = f"gale_shm_{topic}_{run_id}"
+    else:
+        shm_name = f"gale_shm_{topic}"
     try:
         # [Cleanup] Force clean existing SHM to avoid FileExistsError
         from multiprocessing.shared_memory import SharedMemory
@@ -394,7 +399,9 @@ if __name__ == "__main__":
     # [Multi-Day] Capacity
     parser.add_argument('--capacity', type=int, default=200000, help="Ring Buffer Capacity")
     parser.add_argument('--prev-close', type=float, default=0.0, help="Previous Close Price")
+    # [Unique Run ID]
+    parser.add_argument('--run-id', type=str, default=None, help="Unique Execution ID")
     
     args = parser.parse_args()
     
-    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close)
+    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close, run_id=args.run_id)

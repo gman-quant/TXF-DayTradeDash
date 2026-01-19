@@ -27,7 +27,12 @@ logger = logging.getLogger("DashboardRunner")
 class DashboardRunner:
     def __init__(self, args):
         self.args = args
-        self.shm_name = f"gale_shm_{args.topic}"
+        # [Unique Run ID] use dynamic run id if provided
+        if getattr(args, 'run_id', None):
+            self.shm_name = f"gale_shm_{args.topic}_{args.run_id}"
+        else:
+            self.shm_name = f"gale_shm_{args.topic}"
+            
         self.running = True
         
         # 1. Connect to Shared Memory (Reader)
@@ -111,6 +116,8 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, default='live')
     parser.add_argument('--date', type=str, help='History Date')
     parser.add_argument('--session', type=str, help='History Session')
+    # [Unique Run ID]
+    parser.add_argument('--run-id', type=str, default='', help='Unique Execution ID')
     args = parser.parse_args()
     
     runner = DashboardRunner(args)

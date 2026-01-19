@@ -32,7 +32,12 @@ class IngestServer:
 
         # 1. Initialize Shared Memory (Writer Mode: create=True)
         # 命名約定: "gale_shm_{topic}"
-        self.shm_name = f"gale_shm_{args.topic}"
+        # [Unique Run ID]
+        if args.run_id:
+             self.shm_name = f"gale_shm_{args.topic}_{args.run_id}"
+        else:
+             self.shm_name = f"gale_shm_{args.topic}"
+             
         try:
             self.ring_buffer = SharedRingBuffer(
                 name=self.shm_name, capacity=200000, create=True
@@ -352,6 +357,8 @@ if __name__ == "__main__":
         default=0.0,
         help="Reference price (Yesterday Close)",
     )
+    # [Unique Run ID]
+    parser.add_argument("--run-id", type=str, default="", help="Unique Execution ID")
 
     args = parser.parse_args()
 
