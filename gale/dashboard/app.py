@@ -392,25 +392,25 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             # [Mode A] History Replay
             if args and args.mode == "history" and args.date:
                 date_str = args.date
-                suffix = "-n" if args.session == "night" else ""
+                suffix = "-0N" if args.session == "night" else "-1D"
 
             # [Mode B] Live / Forward Test
             # Case 1: 凌晨 (00:00 ~ 08:45) -> 仍屬於夜盤 (Trade Date = Today)
             # 例如: 10/02 04:00 -> 屬於 10/02 的夜盤 (接續 10/01 15:00 開盤的場次)
             elif now.time() < DAY_SESSION_START:
                 date_str = now.strftime("%Y-%m-%d")
-                suffix = "-n"
+                suffix = "-0N"
 
             # Case 2: 下午/晚上 (15:00 ~ 23:59) -> 屬於「隔日」夜盤 (Trade Date = Tomorrow)
             # 例如: 10/01 20:00 -> 歸屬為 10/02 的夜盤
             elif now.time() >= NIGHT_SESSION_START:
                 date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-                suffix = "-n"
+                suffix = "-0N"
 
             # Case 3: 日盤 (08:45 ~ 13:45) -> 屬於今日日盤
             else:
                 date_str = now.strftime("%Y-%m-%d")
-                suffix = ""
+                suffix = "-1D"
 
             filename = f"TXF-Chart-{date_str}{suffix}.html"
 
@@ -555,7 +555,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                     </style>
                 </head>
                 <body>
-                    <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {"🌙" if suffix else "☀️"}</h2>
+                    <h2>🇹🇼 TXF <small style='opacity: 0.6; font-weight: 300;'>SNAPSHOT</small> <span style='color: #444; margin: 0 10px; font-weight: 100;'>|</span> {date_str} {"🌙" if "0N" in suffix else "☀️"}</h2>
                     {header_html}
                     {plot_html}
                 </body>
