@@ -42,8 +42,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
     # [Dynamic Lookback] Pass max buffer capacity to layout for slider config
     app.layout = create_main_layout(max_capacity=indicator_manager.capacity)
 
-    # [New] Store to track the last user-interacted shape index
-    (dcc.Store(id="active-shape-store", data=None),)
+    # [Fix] Store moved to layout.py
 
     # =========================================================================
     # ⚡ Clientside Callback: Drawing Config & Shape Editing
@@ -100,7 +99,9 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             }
             
             try {
-                Plotly.relayout(graph, update);
+                if (window.Plotly) {
+                    Plotly.relayout(graph, update);
+                }
             } catch (e) {
                 console.error("Relayout Error:", e);
             }
@@ -300,7 +301,9 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             raise
         except Exception as e:
             # 捕捉未預期錯誤，打印 Traceback 但不讓 Server 崩潰
-            print(f"❌ Dash Error: {traceback.format_exc()}")
+            # 捕捉未預期錯誤，打印 Traceback 但不讓 Server 崩潰
+            # [Fix] Remove emoji to prevent UnicodeEncodeError on Windows cp950
+            print(f"[Dash Error] {traceback.format_exc()}")
             return NO_DATA_FIGURE, f"System Error: {str(e)}", no_update
 
     # =========================================================================

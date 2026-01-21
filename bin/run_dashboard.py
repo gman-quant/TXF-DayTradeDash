@@ -40,7 +40,7 @@ class DashboardRunner:
             try:
                 # [Multi-Day] Use dynamic capacity from args
                 self.ring_buffer = SharedRingBuffer(name=self.shm_name, capacity=self.args.capacity, create=False)
-                logger.info(f"✅ Dashboard Connected to Shared Buffer: {self.shm_name} (Cap: {self.args.capacity})")
+                logger.info(f"[Connected] Dashboard Connected to Shared Buffer: {self.shm_name} (Cap: {self.args.capacity})")
                 break
             except Exception:
                 logger.warning(f"Waiting for Shared Buffer '{self.shm_name}'...")
@@ -57,7 +57,8 @@ class DashboardRunner:
         後台數據同步迴圈：
         從 Shared Memory 讀取最新 Ticks -> 推送給 IndicatorManager -> 更新 K 線與指標
         """
-        logger.info("🔄 Dashboard Sync Loop Started.")
+
+        logger.info("[Sync] Dashboard Sync Loop Started.")
         get_snapshot = self.ring_buffer.get_snapshot
         on_tick = self.manager.on_tick
         
@@ -92,7 +93,7 @@ class DashboardRunner:
         sync_thread.start()
         
         # 2. 啟動 Dashboard (Blocking Main Thread)
-        logger.info(f"📊 Starting Dashboard Server on port {self.args.port}...")
+        logger.info(f"[Server] Starting Dashboard Server on port {self.args.port}...")
         try:
             # 這裡會卡住 Main Thread 直到結束
             start_dashboard_server(self.manager, port=self.args.port, args=self.args)

@@ -212,6 +212,9 @@ def create_main_layout(max_capacity=200000):
             
             # [New] Dummy store for clientside callback
             dcc.Store(id='drawing-config-store', data={}),
+
+            # [Fix] Added missing store for active shape index
+            dcc.Store(id='active-shape-store', data=None),
         ]
     )
 
