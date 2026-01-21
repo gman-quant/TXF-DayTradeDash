@@ -63,15 +63,12 @@ graph LR
 ### 2. 安裝依賴
 
 ```bash
-python -m venv .venv
+uv venv
 
 . .venv/bin/activate # mac
 . .venv/Scripts/activate # win
 
-python.exe -m pip install --upgrade pip
-
-pip install -r requirements.txt # mac
-pip install -r requirements2.txt # win
+uv pip install -r requirements.txt
 ```
 
 ### 3. 配置設定

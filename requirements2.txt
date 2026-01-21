@@ -1,8 +1,0 @@
-confluent-kafka
-dash
-duckdb
-grpcio-tools
-numba
-pandas
-polars[rtcompat]
-pyarrow

@@ -4,6 +4,6 @@ duckdb
 grpcio-tools
 numba
 pandas
-polars
+polars[rtcompat]
 pyarrow
-uvloop
+uvloop; sys_platform != 'win32'
