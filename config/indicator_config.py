@@ -9,7 +9,7 @@ from config.ui_theme import UI_COLOR
 
 # 預設不顯示的指標 ID 列表 (Default Hidden)
 # 您可以在這裡定義需要的標準差倍數
-VWAP_MULTIPLIERS = [1.0, 2.0, 2.5]
+VWAP_MULTIPLIERS = [1.0, 2.0, 2.5, 3.0]
 
 DEFAULT_OFF_LEGENDS = [
     f'VWAP_Band_{sd}' for sd in VWAP_MULTIPLIERS

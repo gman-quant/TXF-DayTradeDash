@@ -42,13 +42,14 @@ PANEL_STYLE = {
 # 🏗️ Main Layout Structure (主頁面佈局)
 # =============================================================================
 
-def create_main_layout(max_capacity=200000):
+def create_main_layout(max_capacity=200000, update_interval_ms=1000):
     """
     建構 Dash 應用的主要 Layout 結構。
     包含：Header, Scoreboard, Controls, Main Chart, Hidden Stores
     
     Args:
         max_capacity: Slider 的最大範圍 (對應 Shared Memory 容量)
+        update_interval_ms: UI 更新頻率 (毫秒)
     """
     
     # 準備 Dropdown 選項
@@ -196,7 +197,7 @@ def create_main_layout(max_capacity=200000):
             ),
 
             # 5. 狀態暫存區 (Hidden Stores & Interval)
-            dcc.Interval(id='interval-component', interval=1000, n_intervals=0),
+            dcc.Interval(id='interval-component', interval=update_interval_ms, n_intervals=0),
             
             # 紀錄最後更新時間 (用於 Early Peek 優化)
             dcc.Store(id='last-update-timestamp', data=0),

@@ -40,7 +40,8 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
 
     app = dash.Dash(__name__)
     # [Dynamic Lookback] Pass max buffer capacity to layout for slider config
-    app.layout = create_main_layout(max_capacity=indicator_manager.capacity)
+    interval = 2000 if args and getattr(args, 'mode', 'live') == 'history' else 1000
+    app.layout = create_main_layout(max_capacity=indicator_manager.capacity, update_interval_ms=interval)
 
     # [Fix] Store moved to layout.py
 
