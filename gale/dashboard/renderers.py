@@ -16,7 +16,7 @@ def add_main_price_chart(fig, data, row=1, col=1):
     - 若週期包含 's' (秒級)，視為高頻數據，使用 OHLC 線圖 (效能較好)。
     - 否則使用標準 Candlestick (紅綠 K 棒)。
     """
-    current_tf = data.get('timeframe', '1m')
+    current_tf = data.get('timeframe', '5s')
     is_high_freq = 's' in current_tf
     
     if is_high_freq:
@@ -28,9 +28,9 @@ def add_main_price_chart(fig, data, row=1, col=1):
             increasing_line_color=UI_COLOR['TEXT_SUB'], decreasing_line_color=UI_COLOR['TEXT_SUB'],
             increasing_line_width=1, decreasing_line_width=1,
 
-            # 簡潔版 Tooltip
+            # 簡潔版 Tooltip 加入日期與星期 (%a)
             hovertemplate=(
-                '<b>%{x|%H:%M:%S}</b><br>' +
+                '<b>%{x|%m/%d (%a) %H:%M:%S}</b><br>' +
                 'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
                 '<extra></extra>' 
             ),
@@ -45,9 +45,9 @@ def add_main_price_chart(fig, data, row=1, col=1):
             increasing_line_color=UI_COLOR['Kbar_UP'], decreasing_line_color=UI_COLOR['Kbar_DOWN'],
             increasing_fillcolor=UI_COLOR['Kbar_UP'], decreasing_fillcolor=UI_COLOR['Kbar_DOWN'],
             
-            # 簡潔版 Tooltip
+            # 簡潔版 Tooltip 加入日期與星期 (%a)
             hovertemplate=(
-                '<b>%{x|%H:%M:%S}</b><br>' +
+                '<b>%{x|%m/%d (%a) %H:%M:%S}</b><br>' +
                 'O: %{open}<br>H: %{high}<br>L: %{low}<br>C: %{close}<br>' +
                 '<extra></extra>' 
             ),

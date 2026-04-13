@@ -7,11 +7,11 @@ from typing import Tuple, Literal
 # ⚙️ TXF 交易時間常數定義 (已包含邊界預留空間)
 # ============================================================
 
-# 日盤 (RTH) 預留時間
+# 日盤 (RTH) 預留時間 (用於盤別判斷，含緩衝)
 DAY_SESSION_START   = dt_time( 8, 30)      # 實際開盤 08:45
 DAY_SESSION_END     = dt_time(13, 45, 5)   # 實際收盤 13:45 (+5s 預留)
 
-# 夜盤 (ETH) 預留時間
+# 夜盤 (ETH) 預留時間 (用於盤別判斷，含緩衝)
 NIGHT_SESSION_START = dt_time(14, 50)      # 實際開盤 15:00
 NIGHT_SESSION_END   = dt_time( 5,  0, 5)   # 實際收盤 05:00 (+5s 預留)
 

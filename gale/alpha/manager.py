@@ -3,9 +3,20 @@
 import numpy as np
 import gale.alpha.numba_lib as engine
 from config.indicator_config import INDICATORS_SETUP, TYPE_VIRTUAL
-from config.settings import TIMEFRAMES
+from config.settings import TIMEFRAMES, DAY_OPEN_SECOND, NIGHT_OPEN_SECOND, NIGHT_END_SECOND
 from gale.alpha.profile import VolumeProfileEngine
 from gale.alpha.microstructure import MicrostructureEngine
+
+# ==========================================
+# K 線對齊常數：以各盤開盤時間作為 Bucket 基準
+# 所有時間計算均使用 UTC ms，本地時間 = UTC + 8h
+# 開盤時間從 settings.py 讀取，日後不需改此檔。
+# ==========================================
+_TZ_OFFSET_MS  = 8 * 3600 * 1000              # UTC+8 偏移量 (ms)
+_DAY_MS        = 24 * 3600 * 1000             # 一天的毫秒數
+_DAY_OPEN_MS   = DAY_OPEN_SECOND   * 1000     # 日盤開盤 (距本地午夜 ms)
+_NIGHT_OPEN_MS = NIGHT_OPEN_SECOND * 1000     # 夜盤開盤 (距本地午夜 ms)
+_NIGHT_END_MS  = NIGHT_END_SECOND  * 1000     # 夜盤收盤 (距本地午夜 ms)
 
 class IndicatorManager:
     """
@@ -46,6 +57,10 @@ class IndicatorManager:
                 'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': []
             }
             self.current_candles[tf_name] = {}
+
+        # Session 對齊快取：只在跨越時段邊界時重新計算，避免每 Tick 呼叫 datetime
+        self._session_start_ms: int = 0  # 當前時段開盤的 UTC ms
+        self._session_end_ms:   int = 0  # 當前時段結束的 UTC ms (exclusive)
 
         # 2.5 初始化引擎 (Alpha Engines)
         # Volume Profile: 負責價格分佈計算 (POC/VA)
@@ -272,31 +287,73 @@ class IndicatorManager:
             return np.concatenate((chunk1, chunk2))
 
 
+    def _get_session_start_ms(self, tick_time_ms: int) -> int:
+        """
+        返回包含 tick_time_ms 的交易時段開盤時間 (UTC ms)。
+        使用快取邏輯：只在跨越時段邊界時重新計算。
+
+        Session 邊界 (本地 UTC+8):
+          日盤 : 08:45 ~ 14:50
+          夜盤 : 15:00 ~ 次日 05:00
+        """
+        # 快取命中：tick 仍在當前時段內，直接回傳
+        if self._session_start_ms <= tick_time_ms < self._session_end_ms:
+            return self._session_start_ms
+
+        # 計算本地時間輔助量 (純整數運算，無 datetime)
+        local_ms          = tick_time_ms + _TZ_OFFSET_MS
+        ms_from_midnight  = local_ms % _DAY_MS          # 距今天本地午夜的 ms
+        local_midnight_utc = tick_time_ms - ms_from_midnight  # 今天本地午夜的 UTC ms
+
+        if _DAY_OPEN_MS <= ms_from_midnight < _NIGHT_OPEN_MS:
+            # 日盤時段 (08:45 ~ 14:50 本地)
+            self._session_start_ms = local_midnight_utc + _DAY_OPEN_MS
+            self._session_end_ms   = local_midnight_utc + _NIGHT_OPEN_MS
+
+        elif ms_from_midnight >= _NIGHT_OPEN_MS:
+            # 夜盤起始段 (15:00 ~ 隔日 00:00 本地)
+            self._session_start_ms = local_midnight_utc + _NIGHT_OPEN_MS
+            self._session_end_ms   = local_midnight_utc + _DAY_MS + _NIGHT_END_MS
+
+        else:
+            # 夜盤跨夜段 (00:00 ~ 05:00 本地)，屬於前一天的夜盤
+            prev_midnight_utc      = local_midnight_utc - _DAY_MS
+            self._session_start_ms = prev_midnight_utc + _NIGHT_OPEN_MS
+            self._session_end_ms   = local_midnight_utc + _NIGHT_END_MS
+
+        return self._session_start_ms
+
     def _update_candles(self, tick_time_ms, price, volume):
         """
         [內部方法] 更新所有時間週期的 K 線狀態
-        
+
         邏輯：
-        1. 根據時間戳將 Tick 歸類到對應的 Bucket (e.g. 10:00:05 -> 10:00:00 Bucket)
+        1. 以當前交易時段的開盤時間為基準做 Bucket 對齊
+           例：日盤 08:45 開盤，60m Bucket = 08:45, 09:45, 10:45...
+               (而非 08:00, 09:00 等整點)
         2. 檢查是否需要換 K 線 (bucket_time != current_metric.time)
         3. 聚合 OHLCV 數據
         """
+        # 取得本時段的開盤基準點 (快取優化，每 Session 只算一次)
+        session_start_ms = self._get_session_start_ms(tick_time_ms)
+        elapsed_ms       = tick_time_ms - session_start_ms
+
         for tf_name, period_ms in TIMEFRAMES.items():
-            # 計算該週期的 Bucket Time (向下取整)
-            bucket_time_ms = (tick_time_ms // period_ms) * period_ms
-            
+            # 計算該週期的 Bucket Time (以開盤時間為基準向下取整)
+            bucket_time_ms = session_start_ms + (elapsed_ms // period_ms) * period_ms
+
             curr = self.current_candles[tf_name]
             storage = self.candles[tf_name]
-            
+
             if not curr or curr['time'] != bucket_time_ms:
                 # [狀態切換] 新的 K 線週期開始
-                
+
                 # 1. 結算上一根 K 線 (如果存在)
                 if curr:
                     for k, v in curr.items():
                         # 'new_tick' 只是標記，不存入歷史陣列
                         if k != 'new_tick': storage[k].append(v)
-                
+
                 # 2. 初始化新 K 線
                 self.current_candles[tf_name] = {
                     'time': bucket_time_ms,
@@ -305,12 +362,12 @@ class IndicatorManager:
                     'low': price,
                     'close': price,
                     'volume': volume,
-                    'new_tick': True 
+                    'new_tick': True
                 }
             else:
                 # [狀態更新] 更新當前 K 線
                 curr['high'] = max(curr['high'], price)
-                curr['low'] = min(curr['low'], price)
+                curr['low']  = min(curr['low'],  price)
                 curr['close'] = price
                 curr['volume'] += volume
                 curr['new_tick'] = True
