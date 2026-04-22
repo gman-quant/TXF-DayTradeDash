@@ -127,12 +127,16 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'high': candles['high'][candle_start_idx:],
         'low':  candles['low'][candle_start_idx:],
         'close': candles['close'][candle_start_idx:],
-        'volume': candles['volume'][candle_start_idx:]
+        'volume': candles['volume'][candle_start_idx:],
+        'small_lot': candles.get('small_lot', [])[candle_start_idx:],
+        'large_lot': candles.get('large_lot', [])[candle_start_idx:],
+        'mega_lot': candles.get('mega_lot', [])[candle_start_idx:]
     }
     
     if current_candle and current_candle.get('time'):
         for k in plot_candles:
-            plot_candles[k].append(current_candle[k])
+            if k in current_candle:
+                plot_candles[k].append(current_candle[k])
 
     raw_candle_time = np.array(plot_candles['time'], dtype=np.int64)
     candle_x = (raw_candle_time + period_ms).astype('datetime64[ms]') + np.timedelta64(8, 'h')
@@ -144,6 +148,39 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
     for key in indicator_manager.history:
         # 使用 Smart Slicing 讀取
         view_history[key] = indicator_manager.get_linear_snapshot(key, window=window_indices)
+        
+    # [NEW] Time-Based Rolling Window Lots (Tick-aligned continuous delta)
+    # 取代原本的 K-Bar 階梯狀，提供每個刻度都往回算 period_ms 的精確累計值。
+    tf_keys = {'Small_Lot_TF': 'cum_small_net', 'Large_Lot_TF': 'cum_large_net', 'Mega_Lot_TF': 'cum_mega_net'}
+    has_tf_lots = any([ind['id'] in tf_keys for ind in INDICATORS_SETUP])
+    
+    if has_tf_lots and raw_len > 0:
+        raw_timestamps = view_history['timestamp']
+        # We need to compute values for the downsampled slice `timestamps_slice` (length = TARGET_POINTS)
+        # 1. 為了確保能回溯，找出每个 slice 時間點往前回推 period_ms 的 timestamp
+        # period_ms 來自當前選擇的 timeframe
+        target_timestamps = timestamps_slice - period_ms
+        
+        # 2. 透過 searchsorted 找到視窗起始索引 (O(N log M))
+        # left 插值代表找到第一個 >= target_time 的元素 (也就是剛進 window 的那筆)
+        window_start_indices = np.searchsorted(raw_timestamps, target_timestamps, side='left')
+        
+        # 建立 downsampled indices
+        curr_indices = np.arange(0, raw_len, step)[:len(timestamps_slice)]
+        
+        for tgt_key, cum_key in tf_keys.items():
+            if cum_key in view_history:
+                cum_arr = view_history[cum_key]
+                # Delta = Cum[Current] - Cum[Start]
+                # Notice: Start_idx points to the first element INSIDE the window.
+                # So we subtract the prefix sum at Start_idx - 1 (or Start_idx if it's 0)
+                
+                # 計算與原歷史紀錄長度等長的 Delta 陣列 (未 Downsample，供後續模組對齊)
+                target_full = raw_timestamps - period_ms
+                start_idx_full = np.searchsorted(raw_timestamps, target_full, side='left')
+                sub_indices_full = np.maximum(0, start_idx_full - 1)
+                
+                view_history[tgt_key] = cum_arr - cum_arr[sub_indices_full]
               
     # [Refactor] 集中累積邏輯 (Data Prep Layer)
     # 將 OBI/OFI 的原始流量 (Flow) 轉換為累積狀態 (Cumulative State)。

@@ -20,7 +20,7 @@ TIMEFRAMES = {
 }
 
 # 預設顯示週期
-DEFAULT_TIMEFRAME = '5s'
+DEFAULT_TIMEFRAME = '3m'
 
 # -------------------------------------------------------
 # 交易時段實際開盤/收盤時間 (用於 K 線 Bucket 對齊)

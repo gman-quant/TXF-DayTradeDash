@@ -54,7 +54,8 @@ class IndicatorManager:
         # 初始化所有週期 (依據 settings.TIMEFRAMES)
         for tf_name in TIMEFRAMES:
             self.candles[tf_name] = {
-                'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': []
+                'time': [], 'open': [], 'high': [], 'low': [], 'close': [], 'volume': [],
+                'small_lot': [], 'large_lot': [], 'mega_lot': [] # NEW: for TimeFrame based aggregation
             }
             self.current_candles[tf_name] = {}
 
@@ -91,6 +92,11 @@ class IndicatorManager:
         self.history['cum_dn_vol'] = np.zeros(buffer_capacity, dtype=np.int64)
         self.history['cum_dn_pv_sq'] = np.zeros(buffer_capacity, dtype=np.float64)
 
+        # 🆕 Lot Size Accumulators for On-The-Fly Time-Based Rolling Windows
+        self.history['cum_small_net'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['cum_large_net'] = np.zeros(buffer_capacity, dtype=np.float64)
+        self.history['cum_mega_net']  = np.zeros(buffer_capacity, dtype=np.float64)
+
         
         # [Fractal VWAP] Level 2 Removed (Cleaned up)
 
@@ -119,8 +125,8 @@ class IndicatorManager:
         for ind in INDICATORS_SETUP:
             ind_id = ind['id']
             
-            # [virtual] Skip frontend-only indicators
-            if ind.get('type') == TYPE_VIRTUAL:
+            # [virtual/kbar/dynamic] Skip frontend-only, kbar, or dynamically generated indicators (no 'func')
+            if ind.get('type') in [TYPE_VIRTUAL, 'kbar_oscillator'] or 'func' not in ind:
                 continue
                 
             # 為每個指標分配存儲空間
@@ -362,6 +368,9 @@ class IndicatorManager:
                     'low': price,
                     'close': price,
                     'volume': volume,
+                    'small_lot': 0.0,
+                    'large_lot': 0.0,
+                    'mega_lot': 0.0,
                     'new_tick': True
                 }
             else:
@@ -371,6 +380,66 @@ class IndicatorManager:
                 curr['close'] = price
                 curr['volume'] += volume
                 curr['new_tick'] = True
+
+    def _adjust_lot_accumulators(self, curr_idx, prev_idx, type_val, old_vol, new_vol):
+        """
+        [核心] 計算 Lot Size 分類的遞加值，並正確維護 Prefix Sum Arrays。
+        支援「時間回溯修正」：當遇到同時間的「拆單重組」，會更新該片段的所有累計值。
+        """
+        sign = 1 if type_val == 1 else (-1 if type_val == 2 else 0)
+        
+        # 取得上一筆的累計值
+        prev_small = self.history['cum_small_net'][prev_idx]
+        prev_large = self.history['cum_large_net'][prev_idx]
+        prev_mega  = self.history['cum_mega_net'][prev_idx]
+
+        if sign == 0:
+            self.history['cum_small_net'][curr_idx] = prev_small
+            self.history['cum_large_net'][curr_idx] = prev_large
+            self.history['cum_mega_net'][curr_idx]  = prev_mega
+            return
+
+        # 決定變更量 (Delta)
+        old_small = old_vol * sign if old_vol > 0 and old_vol < 5 else 0
+        old_large = old_vol * sign if old_vol >= 5 else 0
+        old_mega  = old_vol * sign if old_vol >= 15 else 0
+        
+        new_small = new_vol * sign if new_vol > 0 and new_vol < 5 else 0
+        new_large = new_vol * sign if new_vol >= 5 else 0
+        new_mega  = new_vol * sign if new_vol >= 15 else 0
+        
+        diff_small = new_small - old_small
+        diff_large = new_large - old_large
+        diff_mega  = new_mega - old_mega
+        
+        # 如果是新事件 (old_vol == 0)，直接累加。
+        # 如果是同事件續疊 (old_vol > 0)，需要回溯修正 Leader 到目前的累加值。
+        if old_vol > 0 and self.rec_last_idx != curr_idx:
+            # 回溯修正區間 [rec_last_idx ... curr_idx - 1]
+            idx_temp = self.rec_last_idx
+            while True:
+                self.history['cum_small_net'][idx_temp] += diff_small
+                self.history['cum_large_net'][idx_temp] += diff_large
+                self.history['cum_mega_net'][idx_temp]  += diff_mega
+                
+                if idx_temp == prev_idx:
+                    break
+                idx_temp = (idx_temp + 1) % self.capacity
+            
+            # 給當前 Tick 的值，是基於已經修正過的 prev
+            prev_small = self.history['cum_small_net'][prev_idx]
+            prev_large = self.history['cum_large_net'][prev_idx]
+            prev_mega  = self.history['cum_mega_net'][prev_idx]
+            
+            self.history['cum_small_net'][curr_idx] = prev_small
+            self.history['cum_large_net'][curr_idx] = prev_large
+            self.history['cum_mega_net'][curr_idx]  = prev_mega
+            
+        else:
+            # 新事件或單一更新，正常寫入
+            self.history['cum_small_net'][curr_idx] = prev_small + diff_small
+            self.history['cum_large_net'][curr_idx] = prev_large + diff_large
+            self.history['cum_mega_net'][curr_idx]  = prev_mega + diff_mega
 
 
     def _update_fractal_vwap(self, idx, price, volume, prev_idx, is_reset):
@@ -515,25 +584,24 @@ class IndicatorManager:
         
         if is_same_event:
             # [Case A: 偵測到拆單 (Split Order)]
-            # 這是同一波攻擊的後續部隊。
             
-            # 1. 搬運法 (Volume Transfer)：把當前這筆量，加回「事件起始點 (Leader)」
-            # 這樣 Leader (即 rec_last_idx) 的量會越來越大，還原出真正的大單規模。
-            self.history['effective_volume'][self.rec_last_idx] += vol_val
+            prev_total = self.history['effective_volume'][self.rec_last_idx]
+            new_total = prev_total + vol_val
             
-            # 2. 歸零法 (Zeroing)：把當前這筆設為 0 (Follower 消失)
-            # 這是為了「總量守恆」。因為量已經搬給 Leader 了，這裡必須消失，
-            # 否則 K 線圖的成交量會變成兩倍 (Double Counting)。
-            # 副作用：依賴 effective_volume 的指標 (如 Retail Flow) 會看到 0，自動忽略此雜訊。
+            self.history['effective_volume'][self.rec_last_idx] = new_total
             self.history['effective_volume'][curr_idx] = 0
+            
+            # 更新累積 Prefix Arrays (處理拆單回溯)
+            self._adjust_lot_accumulators(curr_idx, prev_idx, type_val, prev_total, new_total)
             
         else:
             # [Case B: 新事件 (New Event)]
-            # 時間不同 或 方向不同 -> 視為獨立的新單。
             self.rec_last_time = time_val
             self.rec_last_side = type_val
             self.rec_last_idx = curr_idx
-            # effective_volume 已經在上面預設為 vol_val 了，不用動
+            
+            # 單一更新 Prefix Arrays
+            self._adjust_lot_accumulators(curr_idx, prev_idx, type_val, 0, vol_val)
 
         # ==========================================
         # 2. 執行 Numba 技術指標計算

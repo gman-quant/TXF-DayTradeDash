@@ -17,7 +17,10 @@ DEFAULT_OFF_LEGENDS = [
     # 'SMA_3min', 
     # 'SMA_60', 
     # 'Max_250',
-    # 'Min_250'
+    # 'Min_250',
+    'Small_Lot',
+    'Large_Lot',
+    'Mega_Lot'
 ]
 
 # 指標配置清單
@@ -100,16 +103,16 @@ def get_band_style(sd):
 for sd in VWAP_MULTIPLIERS:
     color, width = get_band_style(sd)
     
-    # 1. Global VWAP Bands
-    INDICATORS_SETUP.append({
-        'id': f'VWAP_Band_{sd}',
-        'type': TYPE_VIRTUAL,
-        'subtype': 'vwap_band',
-        'sd': sd,
-        'color': color,
-        'width': width,
-        'name': f'VWAP ±{sd}σ'
-    })
+    # # 1. Global VWAP Bands
+    # INDICATORS_SETUP.append({
+    #     'id': f'VWAP_Band_{sd}',
+    #     'type': TYPE_VIRTUAL,
+    #     'subtype': 'vwap_band',
+    #     'sd': sd,
+    #     'color': color,
+    #     'width': width,
+    #     'name': f'VWAP ±{sd}σ'
+    # })
     
     # 2. Bull Regime (Upper)
     INDICATORS_SETUP.append({
@@ -254,29 +257,35 @@ INDICATORS_SETUP += [
     #     # 沒寫 yaxis 預設就是 y1 (左軸)
     # },
     
-    # 1. 🟢 小單淨量 (Small Lot Net)
-    # 監控 1~4 口的零散交易動向。
-    # [Upgraded] 使用 effective_volume 過濾拆單。
+    # 1. 🟢 小單淨量 (Small Lot Net) - Tick Based (Rolling 250 ticks)
     {
         'id': 'Small_Lot',
         'func': 'calc_small_lot_net',
         'type': TYPE_OSCILLATOR,
-        'name': 'Small Lot',
+        'name': 'Small Lot (250T)',
         'color': UI_COLOR['LOT_SMALL_UP'],
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # < 5
         'yaxis': 'y',
         'style': 'bar'
     },
+    
+    # 🌟 小單淨量 - Time Frame Based (Continuous Rolling Sum)
+    {
+        'id': 'Small_Lot_TF',
+        'type': TYPE_OSCILLATOR,
+        'name': 'Small Lot (TF)',
+        'color': UI_COLOR['LOT_SMALL_UP'],
+        'yaxis': 'y',
+        'style': 'bar'
+    },
 
-    # 2. 🟡 大單 (Large Lot)
-    # 監控 >= 5 口的所有大單 (包含特大單)。
-    # [Inclusive] 標準法人單，顯示為黃色系。
+    # 2. 🟡 大單 (Large Lot) - Tick Based
     {
         'id': 'Large_Lot', 
-        'func': 'calc_large_lot_net', # Inclusive
+        'func': 'calc_large_lot_net', 
         'type': TYPE_OSCILLATOR,
-        'name': 'Large Lot',
+        'name': 'Large Lot (250T)',
         'color': UI_COLOR['LOT_LARGE_UP'],
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 5],    # >= 5
@@ -284,17 +293,35 @@ INDICATORS_SETUP += [
         'style': 'bar'
     },
 
-    # 3. 🔴 特大單 (Mega Lot)
-    # 監控 >= 15 口的極端大單 (Large Lot 的子集)。
-    # [Highlight] 顯示為紅色系，疊加在黃色之上，代表極高強度。
+    # 🌟 大單 - Time Frame Based
+    {
+        'id': 'Large_Lot_TF', 
+        'type': TYPE_OSCILLATOR,
+        'name': 'Large Lot (TF)',
+        'color': UI_COLOR['LOT_LARGE_UP'],
+        'yaxis': 'y',
+        'style': 'bar'
+    },
+
+    # 3. 🔴 特大單 (Mega Lot) - Tick Based
     {
         'id': 'Mega_Lot',
         'func': 'calc_large_lot_net',
         'type': TYPE_OSCILLATOR,
-        'name': 'Mega Lot',
+        'name': 'Mega Lot (250T)',
         'color': UI_COLOR['LOT_MEGA_UP'],
         'inputs': ['effective_volume', 'type'], 
         'args': [250, 15],   # >= 15
+        'yaxis': 'y',
+        'style': 'bar'
+    },
+    
+    # 🌟 特大單 - Time Frame Based
+    {
+        'id': 'Mega_Lot_TF',
+        'type': TYPE_OSCILLATOR,
+        'name': 'Mega Lot (TF)',
+        'color': UI_COLOR['LOT_MEGA_UP'],
         'yaxis': 'y',
         'style': 'bar'
     },

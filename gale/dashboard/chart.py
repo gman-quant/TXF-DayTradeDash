@@ -138,14 +138,16 @@ def build_combined_figure(data):
     
     for ind in valid_indicators:
         ind_id = ind['id']
-        # [Revert] 回歸單純切片法 (Simple Slicing)
-        # 優先考量數據可見性與程式穩定性。
-        # 註：經查核，Lot Size 屬 Rolling Window Metrics (250 ticks)，切片法在統計上是有效的。
+        
+        # Remove '_TF' suffix to map to internal variables and renderer functions
+        base_id = ind_id.replace('_TF', '')
+
+        # All OS_CILLATORS (including the dynamically resolved TF ones) are natively aligned to tick_x via data['history']
         y_data = data['history'][ind_id][data['start_idx']::data['step']]
         x_data = data['tick_x']
         
         # 動態分派 Renderer (Dynamic Dispatch)
-        method_name = f"render_{ind_id.lower()}"
+        method_name = f"render_{base_id.lower()}"
         renderer = getattr(renderers.OscillatorRenderers, method_name, None)
         
         if renderer:
