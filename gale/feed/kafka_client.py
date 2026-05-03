@@ -107,7 +107,8 @@ class GaleKafkaConsumer:
                 msgs = await loop.run_in_executor(None, self.consumer.consume, batch_size, 0.1)
 
                 if not msgs:
-                    # 沒訊息，繼續
+                    # 沒訊息，回傳空陣列讓外部有機會計算 idle timeout
+                    yield []
                     continue
                 
                 valid_batch = []
@@ -122,8 +123,8 @@ class GaleKafkaConsumer:
                     # 收集有效訊息
                     valid_batch.append(msg)
                 
-                if valid_batch:
-                    yield valid_batch
+                # 就算 valid_batch 是空的，也 yield 出去，以便外部計算 idle
+                yield valid_batch
 
         except asyncio.CancelledError:
             self.logger.info("Consumption loop cancelled.")

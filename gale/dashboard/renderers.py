@@ -65,15 +65,20 @@ def add_main_price_chart(fig, data, row=1, col=1):
     if 'volume' in data['candles']:
         volumes = data['candles']['volume']
         
-        # [Visual Update] Monochrome Volume Bars
-        # 使用單一顏色（半透明 HIGHLIGHT 黃色），營造「金山」效果。
-        # 不需要計算 Open/Close，效能最佳。
+        colors = np.where(
+            np.array(data['candles']['close']) >= np.array(data['candles']['open']),
+            UI_COLOR['Kbar_UP'],
+            UI_COLOR['Kbar_DOWN']
+        )
         
         fig.add_trace(go.Bar(
             x=data['candle_x'],
             y=volumes,
             name='Volume',
-            marker_color=UI_COLOR['VOLUME_FILL'], # 使用主題設定的填充色
+            # marker_color=UI_COLOR['VOLUME_FILL'],  # 原本顏色
+            marker_color=colors,  # 根據漲跌變色
+            opacity=0.5,
+            
             marker_line_width=0,
             xaxis='x',      # [Fix] Explicitly bind to main x-axis
             yaxis='y6',     # 指定使用我們剛定義的疊加軸

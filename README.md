@@ -136,6 +136,25 @@ python -m bin.run_supervisor --mode history --date 2026-01-17 --session night
  > *   **Session Awareness**: 指標 (VWAP, High/Low) 會在每日及夜盤開盤時自動重置。
   
   *(Legacy Kafka History Mode 仍保留，透過 `--mode history` 呼叫)*
+ 
+ ### 4. 自動批次匯出工具 (Headless Batch Export) -> [New!]
+ 
+ 為了方便大量生成歷史圖表與戰情室快照，新增了 `tools/batch_export_html.py`。該工具無需開啟網頁介面，即可全速產出包含所有指標 (含 COFI/COBI) 的 HTML 互動式圖表。
+ 
+ ```bash
+ # 透過 Kafka 歷史回放匯出指定日期 (e.g. 04/01 ~ 05/01)
+ python tools/batch_export_html.py --start-date 2026-04-01 --end-date 2026-05-01
+
+ # 批次匯出 Parquet 歷史 (e.g. 04/27 ~ 05/01) 的日夜雙盤圖表
+ python tools/batch_export_html.py --start-date 2026-04-27 --end-date 2026-05-01 --session day --source parquet 
+ ```
+ 
+ > **💡 工具亮點:**
+ > *   **完全自動化**: 自動識別假日並跳過，預設處理日夜雙盤 (`--session both`)。
+ > *   **預設使用 Kafka**: 預設採 Kafka 歷史回放模式 (`--source kafka`)。
+ > *   **指標完整性**: 確保 100% 同步計算完所有指標後才存檔，戰情看板數值與盤中完全一致。
+ > *   **檔案管理**: 匯出的檔案會自動存放在 `snapshots/` 資料夾，檔名如 `TXF-Chart-2026-04-01-0N.html`。
+
 
 -----
 
@@ -143,8 +162,8 @@ python -m bin.run_supervisor --mode history --date 2026-01-17 --session night
 
 | Argument | Value | Description |
 | :--- | :--- | :--- |
-| **`--source`** | `kafka` (**Default**) | **實時模式 (Live Mode)**。連接 Kafka 接收交易所即時行情。 |
-| | `parquet` | **回放模式 (Replay Mode)**。讀取 Parquet 檔案進行回測或分析。 |
+| **`--source`** | `kafka` | **Kafka 來源**。連線至 Broker 進行實時行情監控。 |
+| | `parquet` (**Default**) | **Parquet 來源**。從歷史檔案載入進行回測或分析。 |
 | **`--speed`** | `0` (**Default**) | **極速載入 (Instant)**。自動全速載入資料 (Static Analysis)。 |
 | | `1.0` | **即時模擬 (Realtime)**。依據歷史時間間隔播放，模擬盤中節奏。 |
 | | `> 1.0` | **倍速播放 (Fast Forward)**。例如 `5.0` 代表 5 倍速快轉。 |
@@ -171,9 +190,12 @@ txf-gale-engine/
 │   ├── strategy/       # 策略執行
 │   └── dashboard/      # 視覺化介面
 ├── config/             # ⚙️ 系統配置
+├── tools/              # 🔧 實用工具
+│   └── batch_export_html.py   # 自動批次 HTML 匯出工具
+├── snapshots/          # 📸 匯出的 HTML 圖表快照
 ├── data_schemas/       # 📝 Protobuf 定義
 ├── Notes/              # 📚 開發筆記
-└── tools/              # 🔧 實用工具
+└── README.md
 ```
 
 -----

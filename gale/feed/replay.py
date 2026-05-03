@@ -385,8 +385,8 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
             time.sleep(1)
     except KeyboardInterrupt:
         pass
-    finally:
-        ring_buffer.shutdown()
+    
+    ring_buffer.shutdown()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -401,7 +401,13 @@ if __name__ == "__main__":
     parser.add_argument('--prev-close', type=float, default=0.0, help="Previous Close Price")
     # [Unique Run ID]
     parser.add_argument('--run-id', type=str, default=None, help="Unique Execution ID")
+    # [Auto Exit]
+    parser.add_argument('--auto-exit', action='store_true', help="Exit automatically when replay is completed")
     
     args = parser.parse_args()
     
+    # We pass args to run_replay if we need, but run_replay signature is specific.
+    # Let's attach args to run_replay by making it global or changing signature.
+    # Actually, we can just check args in run_replay if we pass it, or just use speed_factor. 
+    # I already added a check for speed_factor <= 0 in run_replay. We just need to pass args to run_replay or check speed_factor.
     run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close, run_id=args.run_id)

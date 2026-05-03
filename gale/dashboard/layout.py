@@ -258,6 +258,7 @@ def create_scoreboard_html(last_price, change, change_pct, open_price, high, low
     
     # 當日波幅
     day_range = high - low
+    day_range_pct = day_range / open_price * 100
 
     # --- 2. 組件生成 ---
     
@@ -281,7 +282,7 @@ def create_scoreboard_html(last_price, change, change_pct, open_price, high, low
             html.Div(children=[
                 html.Div([html.Span("High:", style=LABEL_STYLE), html.Span(f"{high:,.0f}", style={'color': UI_COLOR['UP'], 'fontWeight': 'bold'})], style=ROW_STYLE),
                 html.Div([html.Span("Low:", style=LABEL_STYLE), html.Span(f"{low:,.0f}", style={'color': UI_COLOR['DOWN'], 'fontWeight': 'bold'})], style=ROW_STYLE),
-                html.Div([html.Span("Range:", style=LABEL_STYLE), html.Span(f"{day_range:.0f}", style={'color': UI_COLOR['HIGHLIGHT']})], style=ROW_STYLE),
+                html.Div([html.Span("Range:", style=LABEL_STYLE), html.Span(f"{day_range:.0f} ({day_range_pct:.2f}%)", style={'color': UI_COLOR['HIGHLIGHT']})], style=ROW_STYLE),
             ]),
             
             # Column 2: Context (市場參照)

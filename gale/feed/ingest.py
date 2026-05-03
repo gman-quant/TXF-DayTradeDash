@@ -129,6 +129,7 @@ class IngestServer:
         # [Drain Mode] Variables
         tick_ingestion_complete = False
         ingestion_complete = False
+        idle_count = 0
 
         # Pre-calc end timestamp if in history mode
         end_ts_ms = None
@@ -146,6 +147,16 @@ class IngestServer:
 
                 if ingestion_complete:
                     break
+                    
+                if not batch_msgs:
+                    if self.args.mode == "history":
+                        idle_count += 1
+                        if idle_count > 50:  # 50 * 0.1s = 5 seconds idle
+                            logger.info("🏁 No more historical data (Idle timeout). Forcing completion.")
+                            ingestion_complete = True
+                    continue
+                else:
+                    idle_count = 0
 
                 # --- 1. Process Messages (Sequencer) ---
                 for msg in batch_msgs:
@@ -320,9 +331,13 @@ class IngestServer:
             logger.info("✅ Ingestion Completed.")
             self.consumer.close()
 
-            # Keep alive
-            while self.running:
-                await asyncio.sleep(1)
+            if getattr(self.args, "auto_exit", False):
+                logger.info("🚪 Auto-Exit enabled. Exiting Ingestion Server.")
+                self.running = False
+            else:
+                # Keep alive
+                while self.running:
+                    await asyncio.sleep(1)
 
         except asyncio.CancelledError:
             logger.info("Ingestion task cancelled.")
@@ -359,6 +374,8 @@ if __name__ == "__main__":
     )
     # [Unique Run ID]
     parser.add_argument("--run-id", type=str, default="", help="Unique Execution ID")
+    # [Auto Exit] for headless batch export
+    parser.add_argument("--auto-exit", action="store_true", help="Exit automatically when ingestion is completed")
 
     args = parser.parse_args()
 

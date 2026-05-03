@@ -40,7 +40,7 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
 
     app = dash.Dash(__name__)
     # [Dynamic Lookback] Pass max buffer capacity to layout for slider config
-    interval = 2000 if args and getattr(args, 'mode', 'live') == 'history' else 1000
+    interval = 2000
     app.layout = create_main_layout(max_capacity=indicator_manager.capacity, update_interval_ms=interval)
 
     # [Fix] Store moved to layout.py
@@ -480,9 +480,11 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                     chg_open_sign = "+" if chg_open >= 0 else ""
 
                     day_range = high - low
+                    day_range_pct = day_range / open_p * 100
 
                     # --- HTML 模板 (Dark Context) ---
                     header_html = f"""
+
                     <div style="background-color: #1E1E1E; color: white; padding: 15px; border-radius: 10px; border: 1px solid {main_color}; margin-bottom: 20px; font-family: sans-serif; display: flex; justify-content: center; align-items: center;">
                         
                         <!-- [Left] Price Block -->
@@ -496,29 +498,29 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                             
                             <!-- Col 1: Range (波動邊界) -->
                             <div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">High:</span><span style="color:{UI_COLOR["UP"]}; font-weight:bold;">{high:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Low:</span><span style="color:{UI_COLOR["DOWN"]}; font-weight:bold;">{low:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Range:</span><span style="color:{UI_COLOR["HIGHLIGHT"]}; font-weight:bold;">{day_range:.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">High:</span><span style="color:{UI_COLOR["UP"]}; font-weight:bold;">{high:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Low:</span><span style="color:{UI_COLOR["DOWN"]}; font-weight:bold;">{low:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Range:</span><span style="color:{UI_COLOR["HIGHLIGHT"]}; font-weight:bold; white-space:nowrap;">{day_range:.0f} ({day_range_pct:.2f}%)</span></div>
                             </div>
 
                             <!-- Col 2: Context (市場參照) -->
                             <div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:{UI_COLOR["TEXT_SUB"]};">{prev_close:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Spot:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{u_price:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:{UI_COLOR["TEXT_SUB"]};">{prev_close:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Spot:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{u_price:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
                             </div>
 
                             <!-- Col 3: Opening (開盤動態) -->
                             <div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Open:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{open_p:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Open:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{open_p:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
                             </div>
 
                             <!-- Col 4: Cost & Volume (量價結構) -->
                             <div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:{UI_COLOR["VWAP"]}; font-weight:bold;">{vwap:,.0f}</span></div>
-                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:85px; text-align:right; margin-right:10px;">Volume:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{vol:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:{UI_COLOR["VWAP"]}; font-weight:bold;">{vwap:,.0f}</span></div>
+                                <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Volume:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{vol:,.0f}</span></div>
                             </div>
                         </div>
                     </div>
