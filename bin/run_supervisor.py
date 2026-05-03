@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gale.utils.log_utils import setup_logger
 from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
 from gale.infra.db import load_prev_close
-from config.settings import DATA_ROOT
+from config.settings import DATA_ROOT, SHM_CAPACITY
 
 # Logging
 logger = setup_logger("Supervisor")
@@ -153,9 +153,8 @@ class CoreSupervisor:
             logger.info(f"✅ Found {len(txf_files)} TXF files.")
 
             # [Dynamic Capacity Calculation]
-            # Default 200k per day is safe.
-            # We calculate: 200,000 * num_files. Minimum 200,000.
-            calc_capacity = max(200000, 200000 * len(txf_files))
+            # Use SHM_CAPACITY as base. Minimum is one SHM_CAPACITY per file.
+            calc_capacity = max(SHM_CAPACITY, SHM_CAPACITY * len(txf_files))
             logger.info(f"Calculated shared memory capacity: {calc_capacity} ticks.")
             self.capacity = calc_capacity  # Store for Dashboard
 
@@ -206,7 +205,7 @@ class CoreSupervisor:
         else:
             # [Kafka Live/History Mode]
             logger.info("📡 Data Source: Kafka Consumer")
-            self.capacity = 200000  # Default for Kafka
+            self.capacity = SHM_CAPACITY  # Use centralized default for Kafka
             prev_close = self._load_prev_close()
             cmd = [
                 sys.executable,

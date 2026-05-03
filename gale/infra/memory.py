@@ -2,6 +2,7 @@ import numpy as np
 import logging
 from multiprocessing.shared_memory import SharedMemory
 from data_schemas.txf_data_pb2 import Tick
+from config.settings import SHM_CAPACITY
 
 
 class SharedRingBuffer:
@@ -26,7 +27,7 @@ class SharedRingBuffer:
 
     HEADER_SIZE = 128
 
-    def __init__(self, name: str, capacity: int = 200000, create: bool = False):
+    def __init__(self, name: str, capacity: int = SHM_CAPACITY, create: bool = False):
         self.name = name
         self.capacity = capacity
         self.logger = logging.getLogger(f"SharedBuffer-{name}")

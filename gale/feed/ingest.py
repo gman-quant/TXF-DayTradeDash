@@ -7,6 +7,7 @@ from data_schemas.txf_data_pb2 import Tick
 from gale.feed.kafka_client import GaleKafkaConsumer
 from gale.infra.memory import SharedRingBuffer
 from config.txf_calendar import get_current_session_offset
+from config.settings import SHM_CAPACITY
 
 # Try to use uvloop for better performance
 try:
@@ -40,7 +41,7 @@ class IngestServer:
              
         try:
             self.ring_buffer = SharedRingBuffer(
-                name=self.shm_name, capacity=200000, create=True
+                name=self.shm_name, capacity=SHM_CAPACITY, create=True
             )
             logger.info(f"✅ Shared Buffer Created: {self.shm_name}")
 
@@ -252,7 +253,7 @@ class IngestServer:
 
                     is_safe = max_quote_ts >= tick_ts
                     # [Tuning] High volume bursts require larger buffer
-                    is_forced = len(pending_ticks) > 100000
+                    is_forced = len(pending_ticks) > (SHM_CAPACITY // 2)
 
                     if is_safe or is_forced:
                         if is_forced:

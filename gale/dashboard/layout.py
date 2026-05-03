@@ -4,7 +4,7 @@ from dash import dcc, html
 
 # --- Local Configuration ---
 from config.ui_theme import UI_COLOR
-from config.settings import TIMEFRAMES, DEFAULT_TIMEFRAME
+from config.settings import TIMEFRAMES, DEFAULT_TIMEFRAME, SHM_CAPACITY
 from gale.dashboard.chart import create_blank_figure
 
 # =============================================================================
@@ -42,7 +42,7 @@ PANEL_STYLE = {
 # 🏗️ Main Layout Structure (主頁面佈局)
 # =============================================================================
 
-def create_main_layout(max_capacity=200000, update_interval_ms=1000):
+def create_main_layout(max_capacity=SHM_CAPACITY, update_interval_ms=1000):
     """
     建構 Dash 應用的主要 Layout 結構。
     包含：Header, Scoreboard, Controls, Main Chart, Hidden Stores
@@ -60,7 +60,7 @@ def create_main_layout(max_capacity=200000, update_interval_ms=1000):
     
     # [User Request] Lookback Window Max should be half of capacity
     # (Capacity is over-provisioned, e.g. 200k for 1 day, but actual ticks ~50-80k)
-    slider_max = max_capacity // 2
+    slider_max = max_capacity
     
     # [Dynamic Slider Marks]
     # 根據 slider_max 自動計算刻度

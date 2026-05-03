@@ -3,6 +3,9 @@
 # 設定資料根目錄
 DATA_ROOT = "D:/txf-data"
 
+# [Central Config] 共享記憶體預設容量 (筆數)
+SHM_CAPACITY = 400000
+
 # 設定昨收價 (請根據每日實際狀況更新，或未來接 API 自動抓)
 PREV_CLOSE_PRICE = 31669.0
 
