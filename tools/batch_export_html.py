@@ -14,7 +14,7 @@ from gale.infra.memory import SharedRingBuffer
 from gale.alpha.manager import IndicatorManager
 from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.data_model import get_last_value
-from config.settings import DATA_ROOT, PREV_CLOSE_PRICE
+from config.settings import DATA_ROOT, PREV_CLOSE_PRICE, SHM_CAPACITY
 from config.ui_theme import UI_COLOR
 
 # 修正 Windows 下 cp950 無法印出 emoji 的問題
@@ -155,7 +155,7 @@ def process_date(date_str, session, source, broker, group, base_topic):
     run_id = f"batch_{datetime.now().strftime('%H%M%S')}"
     topic = base_topic
     shm_name = f"gale_shm_{topic}_{run_id}"
-    capacity = 200000
+    capacity = SHM_CAPACITY
 
     try:
         prev_close = load_prev_close(date_str, op="<")
