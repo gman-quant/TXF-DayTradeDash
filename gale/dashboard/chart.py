@@ -18,7 +18,8 @@ from config.indicator_config import (
     TYPE_OVERLAY, 
     TYPE_OSCILLATOR,
     TYPE_VIRTUAL,
-    DEFAULT_OFF_LEGENDS
+    DEFAULT_OFF_LEGENDS,
+    VWAP_MULTIPLIERS
 )
 
 VP_LEGEND_GROUP = "Volume_Profile"
@@ -130,6 +131,11 @@ def build_combined_figure(data):
                         fig.data[-1].visible = 'legendonly'
                     else:
                         fig.data[-1].visible = True
+
+    # ---------------------------------------------------------
+    # [New] Bull/Bear Std Dev Band Fills
+    # 在 overlay 結束後繪製線條間填色，順序需在線條之後 (tonexty 依賴順序)
+    renderers.add_regime_band_fills(fig, data, VWAP_MULTIPLIERS, row=1, col=1)
 
     # ---------------------------------------------------------
     # Row 2: Oscillators (副圖指標)

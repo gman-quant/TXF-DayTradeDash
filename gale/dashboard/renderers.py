@@ -1,4 +1,5 @@
 
+import re
 import numpy as np
 import plotly.graph_objects as go
 from config.ui_theme import UI_COLOR
@@ -114,6 +115,123 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     
     # 使用 WebGL 加速渲染 (Scattergl)
     fig.add_trace(go.Scattergl(**trace_kwargs), row=row, col=col)
+
+
+def _color_to_rgba(color: str, alpha: float) -> str:
+    """
+    將任意 'rgb(...)' 或 'rgba(...)' 字串轉換成指定透明度的 rgba 字串。
+    """
+    nums = re.findall(r'[\d.]+', color)
+    r, g, b = int(nums[0]), int(nums[1]), int(nums[2])
+    return f'rgba({r}, {g}, {b}, {alpha})'
+
+
+def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=1):
+    """
+    按 sigma 層級在 Bull/Bear 線條間繪製填色帶，每個層級有獨立 Legend 條目。
+
+    Zone 定義:
+      -1σ Zone   : Bear_Band_1.0  <->  Bull_Band_1.0  (中心帶)
+      -2σ Zone   : ±1σ <-> ±2σ 兩側
+      -2.5σ Zone : ±2σ <-> ±2.5σ 兩側
+      -3σ Zone   : ±2.5σ <-> ±3σ 兩側
+
+    Args:
+        hidden_zones : set of float — 外圍 sd 值，對應的 zone 預設 legendonly。
+                       例如 {2.0} 會讓 '1.0~2.0σ Zone' 預設隱藏。
+    """
+    from config.indicator_config import get_band_style
+
+    tick_x = data['tick_x']
+    history = data['history']
+    start_idx = data['start_idx']
+    step = data['step']
+
+    FILL_ALPHA = 0.15
+
+    def _get_y(key):
+        if key not in history:
+            return None
+        return history[key][start_idx::step]
+
+    def _add_fill_pair(lower_y, upper_y, fill_color, group_name, show_legend, name):
+        """在 lower_y 和 upper_y 之間填色 (fill=tonexty)
+        注意：必須用 go.Scatter，Scattergl (WebGL) 不支援 fill 屬性。
+        """
+        # 底線 (透明錨點) — go.Scatter 才支援 fill
+        fig.add_trace(go.Scatter(
+            x=tick_x, y=lower_y,
+            mode='lines',
+            line=dict(width=0, color='rgba(0,0,0,0)'),
+            showlegend=False,
+            legendgroup=group_name,
+            hoverinfo='skip',
+            name=f'_{name}_lo',
+        ), row=row, col=col)
+
+        # 上線 (填色至底線)
+        fig.add_trace(go.Scatter(
+            x=tick_x, y=upper_y,
+            mode='lines',
+            line=dict(width=0, color='rgba(0,0,0,0)'),
+            fill='tonexty',
+            fillcolor=fill_color,
+            showlegend=show_legend,
+            legendgroup=group_name,
+            name=name,
+            hoverinfo='skip',
+        ), row=row, col=col)
+
+    prev_sd = None
+
+    for sd in multipliers:
+        color, _ = get_band_style(sd)
+        fill_color = _color_to_rgba(color, FILL_ALPHA)
+        group_name = f'Zone_{sd}'
+        
+        # 檢查此 Zone 是否預設隱藏
+        is_hidden = (hidden_zones is not None and sd in hidden_zones)
+        visible_state = 'legendonly' if is_hidden else True
+
+        bull_curr = _get_y(f'Bull_Band_{sd}')
+        bear_curr = _get_y(f'Bear_Band_{sd}')
+
+        if bull_curr is None or bear_curr is None:
+            prev_sd = sd
+            continue
+
+        if prev_sd is None:
+            # 最內層：Bear_Band_1 到 Bull_Band_1（整個中心帶）
+            zone_name = f'1σ Zone'
+            _add_fill_pair(bear_curr, bull_curr, fill_color, group_name,
+                           show_legend=True, name=zone_name)
+            # 設定初始可見度
+            fig.data[-1].visible = visible_state
+            fig.data[-2].visible = visible_state
+        else:
+            # 環形帶：Bull 側 + Bear 側，同一 legendgroup
+            bull_prev = _get_y(f'Bull_Band_{prev_sd}')
+            bear_prev = _get_y(f'Bear_Band_{prev_sd}')
+            if bull_prev is None or bear_prev is None:
+                prev_sd = sd
+                continue
+
+            zone_name = f'{prev_sd}~{sd}σ Zone'
+
+            # Bull 側 (向上，顯示 legend)
+            _add_fill_pair(bull_prev, bull_curr, fill_color, group_name,
+                           show_legend=True, name=zone_name)
+            fig.data[-1].visible = visible_state
+            fig.data[-2].visible = visible_state
+
+            # Bear 側 (向上，不重複顯示 legend)
+            _add_fill_pair(bear_curr, bear_prev, fill_color, group_name,
+                           show_legend=False, name=f'_{zone_name}_bear')
+            fig.data[-1].visible = visible_state
+            fig.data[-2].visible = visible_state
+
+        prev_sd = sd
+
 
 def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1, col=1):
     """
