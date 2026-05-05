@@ -309,7 +309,7 @@ def get_session_static_data(indicator_manager):
         rb = indicator_manager.ring_buffer
         
         # 1. Prev Close (From Header)
-        # PrevClose is stored in header offset 16
+        # Prior Close is stored in header offset 16
         prev_close = rb.prev_close
         
         # 2. Session Open (True First Tick)

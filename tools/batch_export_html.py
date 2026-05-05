@@ -14,6 +14,7 @@ from gale.infra.memory import SharedRingBuffer
 from gale.alpha.manager import IndicatorManager
 from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.data_model import get_last_value
+from gale.dashboard.ui_utils import create_html_scoreboard_string
 from config.settings import DATA_ROOT, PREV_CLOSE_PRICE, SHM_CAPACITY
 from config.ui_theme import UI_COLOR
 
@@ -68,60 +69,7 @@ def export_html(date_str, suffix, fig, sb_data, output_dir):
     if not sb_data:
         header_html = "<div style='color:white; text-align:center'>No Data</div>"
     else:
-        price = sb_data.get("last_price", 0)
-        change = sb_data.get("change", 0)
-        pct = sb_data.get("change_pct", 0)
-        vol = sb_data.get("vol", 0)
-        high = sb_data.get("high", 0)
-        low = sb_data.get("low", 0)
-        prev_close = sb_data.get("prev_close", 0)
-        open_p = sb_data.get("open_price", 0)
-        vwap = sb_data.get("vwap", 0)
-        u_price = sb_data.get("underlying_price", 0)
-
-        main_color = UI_COLOR["UP"] if change >= 0 else UI_COLOR["DOWN"]
-        sign = "+" if change >= 0 else ""
-        gap = open_p - prev_close
-        gap_color = UI_COLOR["UP"] if gap >= 0 else UI_COLOR["DOWN"]
-        gap_sign = "+" if gap >= 0 else ""
-        basis = price - u_price
-        basis_color = UI_COLOR["HIGHLIGHT"]
-        basis_sign = "+" if basis >= 0 else ""
-        chg_open = price - open_p
-        chg_open_color = UI_COLOR["UP"] if chg_open >= 0 else UI_COLOR["DOWN"]
-        chg_open_sign = "+" if chg_open >= 0 else ""
-        day_range = high - low
-        day_range_pct = (day_range / open_p * 100) if open_p else 0
-
-        header_html = f"""
-        <div style="background-color: #1E1E1E; color: white; padding: 15px; border-radius: 10px; border: 1px solid {main_color}; margin-bottom: 20px; font-family: sans-serif; display: flex; justify-content: center; align-items: center;">
-            <div style="margin-right: 50px; text-align: center;">
-                <div style="font-size: 48px; font-weight: bold; color: {main_color}; line-height: 1;">{price:,.0f}</div>
-                <div style="font-size: 20px; color: {main_color}; margin-top: 8px;">{sign}{change:.0f} ({sign}{pct:.2f}%)</div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px 40px; text-align: left; font-size: 14px; line-height: 1.6; color: #BBB;">
-                <div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">High:</span><span style="color:{UI_COLOR["UP"]}; font-weight:bold;">{high:,.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Low:</span><span style="color:{UI_COLOR["DOWN"]}; font-weight:bold;">{low:,.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Range:</span><span style="color:{UI_COLOR["HIGHLIGHT"]}; font-weight:bold; white-space:nowrap;">{day_range:.0f} ({day_range_pct:.2f}%)</span></div>
-                </div>
-                <div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">PrevClose:</span><span style="color:{UI_COLOR["TEXT_SUB"]};">{prev_close:,.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Spot:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{u_price:,.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Basis:</span><span style="color:{basis_color}; font-weight:bold;">{basis_sign}{basis:.2f}</span></div>
-                </div>
-                <div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Open:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{open_p:,.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">OpenGap:</span><span style="color:{gap_color};">{gap_sign}{gap:.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">OpenDelta:</span><span style="color:{chg_open_color};">{chg_open_sign}{chg_open:.0f}</span></div>
-                </div>
-                <div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">VWAP:</span><span style="color:{UI_COLOR["VWAP"]}; font-weight:bold;">{vwap:,.0f}</span></div>
-                    <div><span style="color:{UI_COLOR["TEXT_SUB"]}; display:inline-block; width:65px; text-align:right; margin-right:10px;">Volume:</span><span style="color:{UI_COLOR["TEXT_MAIN"]};">{vol:,.0f}</span></div>
-                </div>
-            </div>
-        </div>
-        """
+        header_html = create_html_scoreboard_string(sb_data)
 
     full_html = f"""
     <!DOCTYPE html>
