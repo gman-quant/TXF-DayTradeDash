@@ -103,7 +103,8 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     trace_kwargs = dict(
         x=data['tick_x'], y=y_data, mode='lines', name=display_name,
         line=dict(color=ind_config['color'], width=ind_config.get('width', 1), dash=ind_config.get('style', 'solid')),
-        hovertemplate='<b>%{fullData.name}</b>: %{y}<extra></extra>'
+        showlegend=ind_config.get('showlegend', True),
+        hovertemplate='<b>%{fullData.name}</b>: %{y:.1f}<extra></extra>'
     )
     
     # 用於 Legend Group 切換 (e.g. 點擊 VWAP 可同時切換 Upper/Lower)
@@ -180,6 +181,7 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
             legendgroup=group_name,
             name=name,
             hoverinfo='skip',
+            legendrank=200 # 設定排序權重
         ), row=row, col=col)
 
     prev_sd = None
@@ -202,7 +204,7 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
 
         if prev_sd is None:
             # 最內層：Bear_Band_1 到 Bull_Band_1（整個中心帶）
-            zone_name = f'1σ Zone'
+            zone_name = f'σ 1.0'
             _add_fill_pair(bear_curr, bull_curr, fill_color, group_name,
                            show_legend=True, name=zone_name)
             # 設定初始可見度
@@ -216,7 +218,12 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
                 prev_sd = sd
                 continue
 
-            zone_name = f'{prev_sd}~{sd}σ Zone'
+            # Determine if this is the last multiplier in the set
+            is_last = (sd == multipliers[-1])
+            if is_last:
+                zone_name = f'σ {prev_sd}+'
+            else:
+                zone_name = f'σ {prev_sd}-{sd}'
 
             # Bull 側 (向上，顯示 legend)
             _add_fill_pair(bull_prev, bull_curr, fill_color, group_name,

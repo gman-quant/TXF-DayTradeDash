@@ -13,11 +13,6 @@ VWAP_MULTIPLIERS = [1.0, 2.0, 2.5, 3.0]
 DEFAULT_OFF_LEGENDS = [
     # Global VWAP Bands (廢用，保留清單)
     f'VWAP_Band_{sd}' for sd in VWAP_MULTIPLIERS
-] + [
-    # Bull/Bear Std 線條 — 全部預設隱藏
-    f'Bull_Band_{sd}' for sd in VWAP_MULTIPLIERS
-] + [
-    f'Bear_Band_{sd}' for sd in VWAP_MULTIPLIERS
 ]
 
 # 指標配置清單
@@ -98,10 +93,11 @@ for sd in VWAP_MULTIPLIERS:
     INDICATORS_SETUP.append({
         'id': f'Bull_Band_{sd}',
         'type': TYPE_VIRTUAL,
-        'color': color,
-        'width': width,
-        'style': 'dash',
-        'name': f'Bull +{sd}σ',
+        'color': 'rgba(0,0,0,0)', # [Ghost Trace] 100% 透明
+        'width': 1,
+        'style': 'solid',
+        'name': f'+{sd}σ',
+        'showlegend': False,      # 不出現在圖例
         'legendgroup': 'Regime_Upper',
         'legendrank': 170 + int(sd)
     })
@@ -110,10 +106,11 @@ for sd in VWAP_MULTIPLIERS:
     INDICATORS_SETUP.append({
         'id': f'Bear_Band_{sd}',
         'type': TYPE_VIRTUAL,
-        'color': color,
-        'width': width,
-        'style': 'dash',
-        'name': f'Bear -{sd}σ',
+        'color': 'rgba(0,0,0,0)', # [Ghost Trace] 100% 透明
+        'width': 1,
+        'style': 'solid',
+        'name': f'-{sd}σ',
+        'showlegend': False,      # 不出現在圖例
         'legendgroup': 'Regime_Lower',
         'legendrank': 180 + int(sd)
     })
@@ -149,34 +146,38 @@ INDICATORS_SETUP += [
         'inputs': ['cum_buy_vol', 'cum_sell_vol'],
         'color': UI_COLOR['CVD'],
         'style': 'solid',
-        'yaxis': 'y2'       
+        'yaxis': 'y2',
+        'legendrank': 210
     },
     # 🌟 小單淨量 - Time Frame Based
     {
         'id': 'Small_Lot_TF',
         'type': TYPE_OSCILLATOR,
-        'name': 'Small Lot (TF)',
+        'name': 'Small Lot',
         'color': UI_COLOR['LOT_SMALL_UP'],
         'yaxis': 'y',
-        'style': 'bar'
+        'style': 'bar',
+        'legendrank': 220
     },
     # 🌟 大單 - Time Frame Based
     {
         'id': 'Large_Lot_TF', 
         'type': TYPE_OSCILLATOR,
-        'name': 'Large Lot (TF)',
+        'name': 'Large Lot',
         'color': UI_COLOR['LOT_LARGE_UP'],
         'yaxis': 'y',
-        'style': 'bar'
+        'style': 'bar',
+        'legendrank': 230
     },
     # 🌟 特大單 - Time Frame Based
     {
         'id': 'Mega_Lot_TF',
         'type': TYPE_OSCILLATOR,
-        'name': 'Mega Lot (TF)',
+        'name': 'Mega Lot',
         'color': UI_COLOR['LOT_MEGA_UP'],
         'yaxis': 'y',
-        'style': 'bar'
+        'style': 'bar',
+        'legendrank': 240
     },
     {
         'id': 'CumOFI',

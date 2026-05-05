@@ -80,7 +80,7 @@ class VolumeProfileEngine:
     2. 並發安全: 使用 `threading.Lock` 確保 Dashboard (讀) 與 Strategy (寫) 安全互斥。
     3. 數據聚合: 提供 `get_distribution` 進行稀疏矩陣壓縮與 Binning (合併價格檔位)。
     """
-    def __init__(self, size=40000):
+    def __init__(self, size=60000):
         # Index = Price (Points). e.g. Index 15000 means price 15000.
         # 台指期價格約 20000 點，40000 點足夠涵蓋且不浪費太多記憶體 (int64 * 40000 * 3 ~ 1MB)
         self.histogram = np.zeros(size, dtype=np.int64)
