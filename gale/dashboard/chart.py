@@ -135,7 +135,7 @@ def build_combined_figure(data):
     # ---------------------------------------------------------
     # [New] Bull/Bear Std Dev Band Fills
     # 在 overlay 結束後繪製線條間填色，順序需在線條之後 (tonexty 依賴順序)
-    renderers.add_regime_band_fills(fig, data, VWAP_MULTIPLIERS, row=1, col=1)
+    renderers.add_regime_band_fills(fig, data, VWAP_MULTIPLIERS, hidden_zones=DEFAULT_OFF_LEGENDS, row=1, col=1)
 
     # ---------------------------------------------------------
     # Row 2: Oscillators (副圖指標)
@@ -190,7 +190,8 @@ def build_combined_figure(data):
         if len(data['tick_x']) > 0:
             x_range = (data['tick_x'][0], data['tick_x'][-1])
             
-        renderers.add_volume_profile(fig, vp, VP_BIN_SIZE, VP_LEGEND_GROUP, x_range=x_range, row=1, col=1)
+        vp_visible = 'VP' not in DEFAULT_OFF_LEGENDS
+        renderers.add_volume_profile(fig, vp, VP_BIN_SIZE, VP_LEGEND_GROUP, x_range=x_range, visible=vp_visible, row=1, col=1)
 
     # =========================================================
     # 🎨 Global Layout Configuration (全局版面設定)

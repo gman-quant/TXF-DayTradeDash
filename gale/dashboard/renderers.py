@@ -138,8 +138,8 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
       -3σ Zone   : ±2.5σ <-> ±3σ 兩側
 
     Args:
-        hidden_zones : set of float — 外圍 sd 值，對應的 zone 預設 legendonly。
-                       例如 {2.0} 會讓 '1.0~2.0σ Zone' 預設隱藏。
+        hidden_zones : set/list of str — 外圍 zone_name，對應的 zone 預設 legendonly。
+                       例如 {'σ 2.0-2.5'} 會讓對應區間預設隱藏。
     """
     from config.indicator_config import get_band_style
 
@@ -190,10 +190,6 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
         color, _ = get_band_style(sd)
         fill_color = _color_to_rgba(color, FILL_ALPHA)
         group_name = f'Zone_{sd}'
-        
-        # 檢查此 Zone 是否預設隱藏
-        is_hidden = (hidden_zones is not None and sd in hidden_zones)
-        visible_state = 'legendonly' if is_hidden else True
 
         bull_curr = _get_y(f'Bull_Band_{sd}')
         bear_curr = _get_y(f'Bear_Band_{sd}')
@@ -202,9 +198,19 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
             prev_sd = sd
             continue
 
+        # 決定區間名稱
+        if prev_sd is None:
+            zone_name = f'σ 1.0'
+        else:
+            is_last = (sd == multipliers[-1])
+            zone_name = f'σ {prev_sd}+' if is_last else f'σ {prev_sd}-{sd}'
+
+        # 檢查此 Zone 是否預設隱藏
+        is_hidden = (hidden_zones is not None and zone_name in hidden_zones)
+        visible_state = 'legendonly' if is_hidden else True
+
         if prev_sd is None:
             # 最內層：Bear_Band_1 到 Bull_Band_1（整個中心帶）
-            zone_name = f'σ 1.0'
             _add_fill_pair(bear_curr, bull_curr, fill_color, group_name,
                            show_legend=True, name=zone_name)
             # 設定初始可見度
@@ -217,13 +223,6 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
             if bull_prev is None or bear_prev is None:
                 prev_sd = sd
                 continue
-
-            # Determine if this is the last multiplier in the set
-            is_last = (sd == multipliers[-1])
-            if is_last:
-                zone_name = f'σ {prev_sd}+'
-            else:
-                zone_name = f'σ {prev_sd}-{sd}'
 
             # Bull 側 (向上，顯示 legend)
             _add_fill_pair(bull_prev, bull_curr, fill_color, group_name,
@@ -240,14 +239,17 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
         prev_sd = sd
 
 
-def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1, col=1):
+def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, visible=True, row=1, col=1):
     """
     繪製 Volume Profile (直方圖 + 關鍵價位)
     
     Args:
         vp_data: 包含 prices, volumes, poc, vah, val 的字典
         x_range: 用於繪製水平線的 X 軸起訖點
+        visible: 控制初始顯示狀態 (True 或 False/legendonly)
     """
+    trace_visible = True if visible else 'legendonly'
+
     if not vp_data or len(vp_data['prices']) == 0:
         return
 
@@ -270,7 +272,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
                     name=name,
                     legendgroup=legend_group,
                     showlegend=False, 
-                    visible='legendonly', # Sync with VP Bars
+                    visible=trace_visible, # Sync with VP Bars
                     legendrank=190,
                     hoverinfo='name+y' # 只顯示名稱與價格
                 ), row=row, col=col)
@@ -305,7 +307,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             marker_line_width=0,
             hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
-            visible='legendonly', # Default Hidden
+            visible=trace_visible,
             showlegend=True,
             legendrank=190
         ))
@@ -324,7 +326,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             marker_line_width=0,
             hovertemplate='<b>Sell Vol</b>: %{x:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
-            visible='legendonly', # Default Hidden
+            visible=trace_visible,
             showlegend=True,
             legendrank=191
         ))
@@ -343,7 +345,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, row=1
             marker_line_width=0,
             hoverinfo='y+x',
             legendgroup=legend_group,
-            visible='legendonly', # Default Hidden
+            visible=trace_visible,
             showlegend=True,
             legendrank=192
         ))

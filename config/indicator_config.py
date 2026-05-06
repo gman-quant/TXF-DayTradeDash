@@ -11,8 +11,8 @@ from config.ui_theme import UI_COLOR
 VWAP_MULTIPLIERS = [1.0, 2.0, 2.5, 3.0]
 
 DEFAULT_OFF_LEGENDS = [
-    # Global VWAP Bands (廢用，保留清單)
-    f'VWAP_Band_{sd}' for sd in VWAP_MULTIPLIERS
+    'VP',          # Volume Profile (預設隱藏)
+    'σ 2.0-2.5',   # Regime Zone (隱藏外圍色帶)
 ]
 
 # 指標配置清單
