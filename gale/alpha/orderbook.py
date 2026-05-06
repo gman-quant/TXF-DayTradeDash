@@ -102,11 +102,9 @@ class LOBEngine:
         # A. 計算總量與 OBI
         bid_vol_sum = sum(quote.bid_volume)
         ask_vol_sum = sum(quote.ask_volume)
-        total = bid_vol_sum + ask_vol_sum
         
-        current_obi = 0.0
-        if total > 0:
-            current_obi = (bid_vol_sum - ask_vol_sum) / total
+        # 改為絕對張數差值 (不除以總量)，使用五檔加總
+        current_obi = float(bid_vol_sum - ask_vol_sum)
             
         # B. 計算 OFI Flow
         # Flow = sum(diff_bid) - sum(diff_ask)
