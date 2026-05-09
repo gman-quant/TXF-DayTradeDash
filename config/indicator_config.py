@@ -55,7 +55,7 @@ INDICATORS_SETUP = [
         'width': 1,
         'style': 'solid',
         'legendgroup': 'VWAP_Cost_Group',
-        'legendrank': 130
+        'legendrank': 131
     },
 
     # --- Fractal VWAP (Regime-Based) ---
@@ -64,18 +64,18 @@ INDICATORS_SETUP = [
         'type': TYPE_VIRTUAL,
         'color': UI_COLOR['COST_LINE'], 
         'width': 1,
-        'name': 'Bull Cost',
+        'name': 'U-Cost',
         'legendgroup': 'VWAP_Cost_Group',
-        'legendrank': 140
+        'legendrank': 132
     },
     {
         'id': 'Fractal_L',
         'type': TYPE_VIRTUAL,
         'color': UI_COLOR['COST_LINE'], 
         'width': 1,
-        'name': 'Bear Cost',
+        'name': 'L-Cost',
         'legendgroup': 'VWAP_Cost_Group',
-        'legendrank': 141
+        'legendrank': 130
     },
 ]
 
