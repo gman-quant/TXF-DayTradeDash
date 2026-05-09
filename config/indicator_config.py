@@ -19,7 +19,7 @@ DEFAULT_OFF_LEGENDS = [
 # 系統會自動讀取此清單，並去 core/numba_engine.py 找對應的函數執行
 INDICATORS_SETUP = [
     # --- 價格主圖指標 (Main Chart) ---
-    # 當盤 VWAP (Session VWAP)
+    # spot price
     {
         'id': 'Underlying_Price',
         'func': 'get_current_value',   # 對應新的 Numba 函數
@@ -31,7 +31,20 @@ INDICATORS_SETUP = [
         'style': 'solid',              # 實線 (區別於 50MA 的虛線)
         'legendrank': 110
     },
-    # 當盤最高價
+    # Session Low
+    {
+        'id': 'Session_Low',
+        'func': 'get_current_value',
+        'args': [0],
+        'type': TYPE_OVERLAY,
+        'inputs': ['session_low'],
+        'name': 'Low',
+        'color': UI_COLOR['SESSION_LOW'],         
+        'style': 'solid',
+        'legendgroup': 'Session_HL_Group',
+        'legendrank': 120
+    },
+    # Session High
     {
         'id': 'Session_High',
         'func': 'get_current_value',
@@ -44,7 +57,7 @@ INDICATORS_SETUP = [
         'legendgroup': 'Session_HL_Group',
         'legendrank': 120
     },
-    # 當盤 VWAP
+    # VWAP
     {
         'id': 'VWAP',
         'func': 'calc_vwap',   
@@ -116,19 +129,6 @@ for sd in VWAP_MULTIPLIERS:
     })
 
 INDICATORS_SETUP += [
-    # 當盤最低價
-    {
-        'id': 'Session_Low',
-        'func': 'get_current_value',
-        'args': [0],
-        'type': TYPE_OVERLAY,
-        'inputs': ['session_low'],
-        'name': 'Low',
-        'color': UI_COLOR['SESSION_LOW'],         
-        'style': 'solid',
-        'legendgroup': 'Session_HL_Group',
-        'legendrank': 120
-    },
     {
         'id': 'Total_Vol',
         'func': 'get_current_value',

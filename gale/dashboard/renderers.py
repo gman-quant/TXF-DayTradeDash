@@ -294,25 +294,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, visib
         # 2. 再畫賣量 (紅色)：疊加在總量之上。
         # 視覺效果：[紅色區塊(Sell)][綠色區塊(剩餘的Buy)]
         
-        # Layer 1: Total Volume (顯示為 Buy Color, Red)
-        fig.add_trace(go.Bar(
-            y=prices,
-            x=buy_vols,
-            orientation='h',
-            xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
-            yaxis='y',
-            name='VP Buy Vol',
-            width=bin_size * 0.95,
-            marker_color=UI_COLOR['VP_BUY'], # 紅色
-            marker_line_width=0,
-            hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
-            legendgroup=legend_group,
-            visible=trace_visible,
-            showlegend=True,
-            legendrank=190
-        ))
-        
-        # Layer 2: Sell Volume (顯示為 Sell Color, Green)
+        # Layer 1: Sell Volume (顯示為 Sell Color, Green)
         fig.add_trace(go.Bar(
             y=prices,
             x=total_vols,
@@ -325,6 +307,23 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, visib
             marker_color=UI_COLOR['VP_SELL'], # 綠色 (加上透明度)
             marker_line_width=0,
             hovertemplate='<b>Sell Vol</b>: %{x:,}<br>Price: %{y}<extra></extra>',
+            legendgroup=legend_group,
+            visible=trace_visible,
+            showlegend=True,
+            legendrank=190
+        ))
+        # Layer 2: Total Volume (顯示為 Buy Color, Red)
+        fig.add_trace(go.Bar(
+            y=prices,
+            x=buy_vols,
+            orientation='h',
+            xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
+            yaxis='y',
+            name='VP Buy Vol',
+            width=bin_size * 0.95,
+            marker_color=UI_COLOR['VP_BUY'], # 紅色
+            marker_line_width=0,
+            hovertemplate='<b>Buy Vol</b>: %{customdata:,}<br>Price: %{y}<extra></extra>',
             legendgroup=legend_group,
             visible=trace_visible,
             showlegend=True,
