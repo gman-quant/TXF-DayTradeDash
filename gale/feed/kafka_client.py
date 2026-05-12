@@ -195,14 +195,19 @@ class GaleKafkaConsumer:
         # 確保 active_topics 是基於起點存在的 Topic，且我們知道終點在哪
         active_topics = set([tp.topic for tp in to_assign if tp.topic in end_offset_map])
         
+        idle_count = 0
         try:
             while active_topics:
                 msgs = await loop.run_in_executor(None, self.consumer.consume, BATCH_SIZE, 0.1)
                 
                 if not msgs:
-                    # 防止無窮迴圈：如果 active_topics 還有，但一直讀不到資料 (可能剛好卡在邊界)
-                    # 可以在這裡加入超時判斷，或者簡單地讓它繼續嘗試 (視 Kafka 穩定性而定)
+                    idle_count += 1
+                    if idle_count > 30: # 30 * 0.1 = 3 seconds idle
+                        self.logger.info(f"⏳ No more historical data (Idle timeout). Forcing completion.")
+                        break
                     continue
+                else:
+                    idle_count = 0
 
                 for msg in msgs:
                     if msg.error(): continue

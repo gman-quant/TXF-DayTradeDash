@@ -155,6 +155,21 @@ python -m bin.run_supervisor --mode history --date 2026-01-17 --session night
  > *   **指標完整性**: 確保 100% 同步計算完所有指標後才存檔，戰情看板數值與盤中完全一致。
  > *   **檔案管理**: 匯出的檔案會自動存放在 `snapshots/` 資料夾，檔名如 `TXF-Chart-2026-04-01-0N.html`。
 
+ ### 5. 自動批次五檔資料匯出工具 (Batch Export BidAsk) -> [New!]
+ 
+ 針對五檔 (BidAsk) 歷史資料搜集，新增了 `tools/batch_export_bidask.py`。該工具會透過 Kafka 自動批次將特定時間範圍內的所有五檔資料匯出為 Parquet 格式，支援斷點續傳和自動略過非交易日。
+
+ ```bash
+ # 從 2025-12-01 開始批次抓取到今天的日夜盤五檔資料
+ python tools/batch_export_bidask.py
+
+ # 指定日期範圍與盤別
+ python tools/batch_export_bidask.py --start-date 2025-12-01 --end-date 2026-05-10 --session both
+ ```
+
+ > **💡 工具亮點:**
+ > *   **自動化建立高精度歷史庫**: 每跑完一天會自動依據年份、月份存放至 `D:\txf-data\raw_ticks\TXF\` 目錄下，如 `2026-05-09_TXF_bidask.parquet`。
+ > *   **精確原物料擷取**: 直接解析 Protobuf 還原最原始的五檔陣列，提供最高品質的歷史回測依據。
 
 -----
 
@@ -191,7 +206,8 @@ txf-gale-engine/
 │   └── dashboard/      # 視覺化介面
 ├── config/             # ⚙️ 系統配置
 ├── tools/              # 🔧 實用工具
-│   └── batch_export_html.py   # 自動批次 HTML 匯出工具
+│   ├── batch_export_html.py   # 自動批次 HTML 匯出工具
+│   └── batch_export_bidask.py # 自動批次五檔資料匯出工具
 ├── snapshots/          # 📸 匯出的 HTML 圖表快照
 ├── data_schemas/       # 📝 Protobuf 定義
 ├── Notes/              # 📚 開發筆記

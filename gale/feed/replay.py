@@ -7,8 +7,12 @@ import numpy as np
 import datetime
 
 # 引入核心組件
-from data_schemas.txf_data_pb2 import Tick
+from data_schemas.txf_data_pb2 import Tick, BidAsk
 from gale.infra.memory import SharedRingBuffer
+from gale.alpha.orderbook import LOBEngine
+from config.settings import SHM_CAPACITY
+import os
+import re
 
 # 設定 Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
@@ -20,7 +24,7 @@ except ImportError:
     logger.error("❌ Polars not installed. Please run: pip install polars")
     sys.exit(1)
 
-def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=200000, prev_close=0.0, run_id=None):
+def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=SHM_CAPACITY, prev_close=0.0, tse_prev_close=0.0, run_id=None):
     """
     Parquet 回放器主邏輯 (Multi-Day Support)
     Args:
@@ -164,7 +168,117 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
         except Exception as e:
             logger.warning(f"Failed to merge underlying data: {e}")
 
-    # 2. 初始化 Shared Memory
+    # 1.6 載入與重建 LOB 特徵 (BidAsk Parquet) - 優雅降級支援
+    df_lob = None
+    bidask_files = []
+    
+    # 自動偵測對應的 bidask.parquet
+    for tick_file in parquet_files:
+        # 1. 嘗試直接替換 (e.g. _ticks -> _bidask)
+        ba_file = tick_file.replace("_ticks", "_bidask")
+        if os.path.exists(ba_file):
+            bidask_files.append(ba_file)
+            continue
+            
+        # 2. 嘗試處理 Night Session 降級 (回退到 both session 的 bidask 檔)
+        if "_night" in tick_file:
+            ba_file_alt = tick_file.replace("_ticks_night", "_bidask")
+            if os.path.exists(ba_file_alt):
+                bidask_files.append(ba_file_alt)
+                continue
+                
+        # 3. 嘗試更激進的搜尋
+        try:
+            dir_name = os.path.dirname(tick_file)
+            base_name = os.path.basename(tick_file)
+            match = re.search(r"(\d{4}-\d{2}-\d{2})", base_name)
+            if match:
+                date_part = match.group(1)
+                for f in os.listdir(dir_name):
+                    if date_part in f and "_bidask" in f and f.endswith(".parquet"):
+                        candidate = os.path.join(dir_name, f)
+                        if candidate not in bidask_files:
+                            bidask_files.append(candidate)
+                            break
+        except Exception:
+            pass
+
+    arr_obi = None
+    arr_ofi = None
+    arr_lag = None
+
+    if not bidask_files:
+        logger.info(f"ℹ️ [Graceful Degradation] No bidask parquet found. (Tried to match ticks: {parquet_files[0] if parquet_files else 'None'})")
+        logger.info("Falling back to Tick-only mode (COBI/COFI will be 0).")
+    else:
+        logger.info(f"📊 Loading {len(bidask_files)} bidask files for LOB reconstruction...")
+        try:
+            df_ba = pl.scan_parquet(bidask_files).collect()
+            
+            # 時間轉換
+            if df_ba['timestamp_ms'].dtype in (pl.Datetime, pl.Date):
+                df_ba = df_ba.with_columns(
+                    (pl.col("timestamp_ms").cast(pl.Int64) / 1_000_000).cast(pl.Int64).alias("timestamp_ms")
+                )
+            
+            # df_ba is expected to be in UTC epoch milliseconds.
+            # Removed dangerous Timezone Auto-Alignment that caused issues when night session data was missing.
+                
+            df_ba = df_ba.sort("timestamp_ms")
+            
+            logger.info("⚙️ Reconstructing LOB features by interleaving Quotes and Ticks (This may take a few seconds)...")
+            
+            ts_arr = df['timestamp'].to_numpy()
+            arr_obi = np.zeros(len(ts_arr), dtype=np.float64)
+            arr_ofi = np.zeros(len(ts_arr), dtype=np.float64)
+            arr_lag = np.zeros(len(ts_arr), dtype=np.float64)
+            
+            lob_engine = LOBEngine()
+            
+            ba_records = list(zip(
+                df_ba['timestamp_ms'].to_list(),
+                df_ba['code'].to_list(),
+                df_ba['bid_total_vol'].to_list(),
+                df_ba['ask_total_vol'].to_list(),
+                df_ba['bid_price'].to_list(),
+                df_ba['bid_volume'].to_list(),
+                df_ba['diff_bid_vol'].to_list(),
+                df_ba['ask_price'].to_list(),
+                df_ba['ask_volume'].to_list(),
+                df_ba['diff_ask_vol'].to_list()
+            ))
+            
+            ba_idx = 0
+            ba_len = len(ba_records)
+            
+            for i, tick_ts in enumerate(ts_arr):
+                while ba_idx < ba_len and ba_records[ba_idx][0] <= tick_ts:
+                    ts, code, btv, atv, bp, bv, dbv, ap, av, dav = ba_records[ba_idx]
+                    q = BidAsk()
+                    q.timestamp_ms = ts
+                    q.code = code
+                    q.bid_total_vol = btv
+                    q.ask_total_vol = atv
+                    q.bid_price.extend(bp)
+                    q.bid_volume.extend(bv)
+                    q.diff_bid_vol.extend(dbv)
+                    q.ask_price.extend(ap)
+                    q.ask_volume.extend(av)
+                    q.diff_ask_vol.extend(dav)
+                    
+                    lob_engine.update(q)
+                    ba_idx += 1
+                
+                obi, ofi, lag = lob_engine.get_metrics(tick_ts)
+                arr_obi[i] = obi
+                arr_ofi[i] = ofi
+                arr_lag[i] = lag
+                
+            logger.info("✅ LOB features reconstructed successfully!")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process bidask data: {e}. Falling back to Tick-only mode.")
+            arr_obi = None    # 2. 初始化 Shared Memory
     if run_id:
         shm_name = f"gale_shm_{topic}_{run_id}"
     else:
@@ -255,6 +369,8 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
         
         if underlying_arr is not None:
             t.underlying_price = int(underlying_arr[idx] * 10000)
+        elif tse_prev_close > 0:
+            t.underlying_price = int(tse_prev_close * 10000)
             
         if total_vol_arr is not None:
              t.total_volume = int(total_vol_arr[idx])
@@ -279,7 +395,16 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
 
             # A. 呼叫標準寫入 (寫入 Basic Data)
             start_head = ring_buffer.head
-            ring_buffer.write_batch(batch_buffer)
+            
+            if arr_obi is not None:
+                batch_lob_metrics = []
+                end_idx_lob = idx + 1
+                start_idx_lob = end_idx_lob - len(batch_buffer)
+                for i in range(start_idx_lob, end_idx_lob):
+                    batch_lob_metrics.append((arr_obi[i], arr_ofi[i], arr_lag[i]))
+                ring_buffer.write_batch(batch_buffer, lob_data=batch_lob_metrics)
+            else:
+                ring_buffer.write_batch(batch_buffer)
             
             # [Debug First Write]
             if count == 0:
@@ -340,7 +465,17 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
     # Flush remaining
     if batch_buffer:
         start_head = ring_buffer.head
-        ring_buffer.write_batch(batch_buffer)
+        
+        if arr_obi is not None:
+            batch_lob_metrics = []
+            end_idx_lob = total
+            start_idx_lob = total - len(batch_buffer)
+            for i in range(start_idx_lob, end_idx_lob):
+                batch_lob_metrics.append((arr_obi[i], arr_ofi[i], arr_lag[i]))
+            ring_buffer.write_batch(batch_buffer, lob_data=batch_lob_metrics)
+        else:
+            ring_buffer.write_batch(batch_buffer)
+
         # B. Flush overwrite (Duplicate logic, simplified)
         # ... (For strictness we should duplicate the logic, but usually last batch is small importance. 
         # Actually logic is generic enough, let's just accept it might be minorly inaccurate for last <1000 ticks or copy logic.
@@ -397,8 +532,9 @@ if __name__ == "__main__":
     # [Multi-Day] Accept list of underlying files
     parser.add_argument('--underlying', nargs='*', help="Path to Underlying (TSE) parquet file(s)", default=None)
     # [Multi-Day] Capacity
-    parser.add_argument('--capacity', type=int, default=200000, help="Ring Buffer Capacity")
+    parser.add_argument('--capacity', type=int, default=SHM_CAPACITY, help="Ring Buffer Capacity")
     parser.add_argument('--prev-close', type=float, default=0.0, help="Previous Close Price")
+    parser.add_argument('--tse-prev-close', type=float, default=0.0, help="TSE Previous Close Price")
     # [Unique Run ID]
     parser.add_argument('--run-id', type=str, default=None, help="Unique Execution ID")
     # [Auto Exit]
@@ -410,4 +546,4 @@ if __name__ == "__main__":
     # Let's attach args to run_replay by making it global or changing signature.
     # Actually, we can just check args in run_replay if we pass it, or just use speed_factor. 
     # I already added a check for speed_factor <= 0 in run_replay. We just need to pass args to run_replay or check speed_factor.
-    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close, run_id=args.run_id)
+    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close, args.tse_prev_close, run_id=args.run_id)

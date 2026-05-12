@@ -198,11 +198,30 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
     # 如果 SHM 存的是 Flow，那我們切片後做 cumsum，起點會歸零。這在圖表上會呈現 "從左邊開始累積"。
     # 這對於 "區間觀察" 是合理的 (Relative OBI)。
     
-    if 'obi' in view_history:
-        view_history['obi'] = np.cumsum(view_history['obi'])
-        
-    if 'ofi' in view_history:
-        view_history['ofi'] = np.cumsum(view_history['ofi'])
+    # [Session-Aware Cumsum]
+    # 當 Viewport 跨越盤別 (例如: 昨晚夜盤 -> 今早日盤) 時，COBI/COFI 應該重新歸零。
+    # 偵測方式：兩筆 Tick 之間隔超過 1 小時 (3600000 ms) 視為新盤。
+    if 'obi' in view_history or 'ofi' in view_history:
+        ts = view_history.get('timestamp', np.array([]))
+        if len(ts) > 0:
+            RESET_THRESHOLD_MS = 3600000
+            reset_mask_full = np.concatenate(([False], np.diff(ts) > RESET_THRESHOLD_MS))
+            reset_indices = np.where(reset_mask_full)[0]
+            
+            def grouped_cumsum(arr):
+                c_arr = np.cumsum(arr)
+                if len(reset_indices) == 0:
+                    return c_arr
+                baselines = np.zeros_like(c_arr)
+                for idx in reset_indices:
+                    baselines[idx:] = c_arr[idx - 1]
+                return c_arr - baselines
+            
+            if 'obi' in view_history:
+                view_history['obi'] = grouped_cumsum(view_history['obi'])
+                
+            if 'ofi' in view_history:
+                view_history['ofi'] = grouped_cumsum(view_history['ofi'])
 
     # [NEW] VWAP Bands Calculation (Session-Based)
     # 現在改為直接使用 SHM 中已經重置好的累積值 (cum_pv, cum_volume, cum_pv_sq)

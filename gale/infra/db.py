@@ -54,9 +54,9 @@ def load_history_data(parquet_path, date_str, session="day"):
             con.close()
 
 
-def load_prev_close(target_date_str, op="<"):
+def load_prev_close(target_date_str, op="<", symbol="TXF"):
     """
-    從日 Summary Parquet (TXF_1d_YYYY.parquet) 取得參考用「昨收價」。
+    從日 Summary Parquet 取得參考用「昨收價」。
     (DuckDB Implementation)
     """
     try:
@@ -65,7 +65,7 @@ def load_prev_close(target_date_str, op="<"):
 
         for year in years_to_check:
             # [Fix] Use centralized DATA_ROOT from config
-            BASE_PATH = os.path.join(DATA_ROOT, "kbars", "1d", "TXF")
+            BASE_PATH = os.path.join(DATA_ROOT, "kbars", "1d", symbol)
             
             if not os.path.exists(BASE_PATH):
                 logger.warning(
@@ -73,7 +73,7 @@ def load_prev_close(target_date_str, op="<"):
                 )
                 continue
 
-            parquet_path = f"{BASE_PATH}/TXF_1d_{year}.parquet"
+            parquet_path = f"{BASE_PATH}/{symbol}_1d_{year}.parquet"
 
             if not os.path.exists(parquet_path):
                 continue

@@ -16,7 +16,6 @@ from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.data_model import get_last_value
 from gale.dashboard.ui_utils import create_html_scoreboard_string
 from config.settings import DATA_ROOT, PREV_CLOSE_PRICE, SHM_CAPACITY
-from config.ui_theme import UI_COLOR
 
 # 修正 Windows 下 cp950 無法印出 emoji 的問題
 if sys.stdout.encoding != 'utf-8':
@@ -106,10 +105,16 @@ def process_date(date_str, session, source, broker, group, base_topic):
     capacity = SHM_CAPACITY
 
     try:
-        prev_close = load_prev_close(date_str, op="<")
+        prev_close = load_prev_close(date_str, op="<", symbol="TXF")
     except Exception as e:
-        logger.warning(f"Could not load prev close: {e}. Using default.")
+        logger.warning(f"Could not load TXF prev close: {e}. Using default.")
         prev_close = PREV_CLOSE_PRICE
+        
+    try:
+        tse_prev_close = load_prev_close(date_str, op="<", symbol="TSE")
+    except Exception as e:
+        logger.warning(f"Could not load TSE prev close: {e}.")
+        tse_prev_close = 0.0
 
     cmd = []
     if source == "parquet":
@@ -123,7 +128,7 @@ def process_date(date_str, session, source, broker, group, base_topic):
         cmd = [sys.executable, "-m", "gale.feed.replay", f_txf]
         if os.path.exists(f_tse):
             cmd.extend(["--underlying", f_tse])
-        cmd.extend(["--prev-close", str(prev_close), "--capacity", str(capacity), "--topic", topic, "--speed", "0", "--run-id", run_id])
+        cmd.extend(["--prev-close", str(prev_close), "--tse-prev-close", str(tse_prev_close), "--capacity", str(capacity), "--topic", topic, "--speed", "0", "--run-id", run_id])
         
     elif source == "kafka":
         cmd = [sys.executable, "-m", "gale.feed.ingest", "--broker", broker, "--group", group, "--topic", topic, 
@@ -215,9 +220,30 @@ def process_date(date_str, session, source, broker, group, base_topic):
             "underlying_price": get_last_value(hist, "Underlying_Price"),
         }
         
-        suffix = "-0N" if session == "night" else "-1D"
+        # Dynamic Date and Session from actual last tick timestamp
+        actual_date_str = date_str
+        actual_suffix = "-0N" if session == "night" else "-1D"
+        
+        if "timestamp" in hist and len(hist["timestamp"]) > 0:
+            last_ts_ms = hist["timestamp"][-1]
+            last_dt = datetime.fromtimestamp(last_ts_ms / 1000.0)
+            
+            # Trading Day Logic
+            if last_dt.hour < 8:
+                actual_suffix = "-0N"
+                actual_date_str = last_dt.strftime("%Y-%m-%d") 
+            elif last_dt.hour >= 14:
+                actual_suffix = "-0N"
+                actual_date_str = (last_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                actual_suffix = "-1D"
+                actual_date_str = last_dt.strftime("%Y-%m-%d")
+
+        if source == "parquet":
+            actual_suffix += "_p"
+            
         output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "snapshots")
-        export_html(date_str, suffix, fig, sb_data, output_dir)
+        export_html(actual_date_str, actual_suffix, fig, sb_data, output_dir)
     else:
         logger.warning(f"No ticks processed for {date_str} {session}. Skipping HTML.")
     

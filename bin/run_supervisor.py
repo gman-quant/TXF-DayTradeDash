@@ -62,7 +62,7 @@ class CoreSupervisor:
         self.run_id = datetime.now().strftime("%H%M%S")
         logger.info(f"🆔 Session Run ID: {self.run_id}")
 
-    def _load_prev_close(self, target_date_str=None):
+    def _load_prev_close(self, target_date_str=None, symbol="TXF"):
         """
         [重構] 使用基礎架構模組載入昨收價 (Reference Price)。
         """
@@ -79,7 +79,7 @@ class CoreSupervisor:
         else:
             op = "<"
 
-        return load_prev_close(target_date_str, op=op)
+        return load_prev_close(target_date_str, op=op, symbol=symbol)
 
     def start_ingestion(self):
         """啟動 Ingestion Process (獨立進程)"""
@@ -183,7 +183,7 @@ class CoreSupervisor:
             if start_date_for_prev:
                 try:
                     replay_prev_close = self._load_prev_close(
-                        target_date_str=start_date_for_prev
+                        target_date_str=start_date_for_prev, symbol="TXF"
                     )
                     cmd.extend(["--prev-close", str(replay_prev_close)])
                     logger.info(
@@ -191,6 +191,17 @@ class CoreSupervisor:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to load replay prev close: {e}")
+                    
+                try:
+                    tse_prev_close = self._load_prev_close(
+                        target_date_str=start_date_for_prev, symbol="TSE"
+                    )
+                    cmd.extend(["--tse-prev-close", str(tse_prev_close)])
+                    logger.info(
+                        f"✅ Replay TSE Prev Close for {start_date_for_prev}: {tse_prev_close}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to load replay TSE prev close: {e}")
 
             cmd.extend(["--capacity", str(calc_capacity)])
             cmd.extend(["--topic", self.args.topic])
@@ -239,7 +250,7 @@ class CoreSupervisor:
         port = 8051 if self.args.mode == "history" else 8050
 
         # 2. 決定容量
-        capacity = getattr(self, "capacity", 200000)
+        capacity = getattr(self, "capacity", SHM_CAPACITY)
 
         # --- [核心修改點] 動態判定時段 ---
         # 優先檢查是否為 live 模式，如果是，則根據時間自動切換

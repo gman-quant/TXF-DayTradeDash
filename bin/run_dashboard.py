@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from gale.infra.memory import SharedRingBuffer
 from gale.alpha.manager import IndicatorManager
 from gale.dashboard.app import start_dashboard_server
+from config.settings import SHM_CAPACITY
 
 # Logging
 logging.basicConfig(
@@ -111,7 +112,7 @@ if __name__ == "__main__":
     parser.add_argument('--topic', type=str, default='txf-tick')
     parser.add_argument('--port', type=int, default=8050, help="Dashboard port")
     # [Multi-Day] Add capacity argument
-    parser.add_argument('--capacity', type=int, default=200000, help="RingBuffer Capacity")
+    parser.add_argument('--capacity', type=int, default=SHM_CAPACITY, help="RingBuffer Capacity")
     
     # [History Context]
     parser.add_argument('--mode', type=str, default='live')

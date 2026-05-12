@@ -8,6 +8,7 @@ from gale.infra.memory import SharedRingBuffer
 from gale.alpha.manager import IndicatorManager
 from gale.strategy.position import PositionManager
 from gale.strategy.strategies.chop_reversal import ChopReversalStrategy
+from config.settings import SHM_CAPACITY
 
 # Logging
 logging.basicConfig(
@@ -27,7 +28,7 @@ class StrategyServer:
         # 不斷嘗試連線直到 Writer 啟動
         while True:
             try:
-                self.ring_buffer = SharedRingBuffer(name=self.shm_name, capacity=200000, create=False)
+                self.ring_buffer = SharedRingBuffer(name=self.shm_name, capacity=SHM_CAPACITY, create=False)
                 logger.info(f"✅ Connected to Shared Buffer: {self.shm_name}")
                 break
             except Exception:
@@ -36,7 +37,7 @@ class StrategyServer:
         
         # 2. Initialize Indicator Manager
         # IndicatorManager 會配置自己的 Local Memory 來存放指標計算結果 (RSI, MA...)
-        self.manager = IndicatorManager(buffer_capacity=200000)
+        self.manager = IndicatorManager(buffer_capacity=SHM_CAPACITY)
         
         # 3. Initialize Position Manager (Paper Trading)
         # 用於模擬下單與損益計算
