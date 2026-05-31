@@ -2,12 +2,13 @@
 
 import asyncio
 import logging
+import gc  # [新增] 匯入垃圾回收模組
 from datetime import datetime
 from typing import Callable, Optional
 
 from confluent_kafka import Consumer, TopicPartition, KafkaError, Message
 
-# 假設 Protobuf 編譯後的檔案已存在 (稍後我們會處理這部分)
+# 假設 Protobuf 編譯後的檔案已存在
 # from data_schemas.txf_pb2 import Tick
 
 class GaleKafkaConsumer:
@@ -31,11 +32,14 @@ class GaleKafkaConsumer:
         conf = {
             'bootstrap.servers': self.broker_url,
             'group.id': self.group_id,
-            'auto.offset.reset': 'latest',  # 預設行為，雖然我們會手動 seek
-            'enable.auto.commit': False,    # 追求低延遲通常關閉自動 commit，或自行控制
-            # [HFT Optimization] client-side tuning
-            'fetch.min.bytes': 1,           # 有資料馬上抓 (只要 1 byte 就回傳)
-            'fetch.wait.max.ms': 10,       # 最多等 10ms (平衡點：避免空轉過快，但保有反應力)
+            'auto.offset.reset': 'latest',  
+            'enable.auto.commit': False,    
+            
+            # [HFT Optimization] 極致低延遲調校
+            'fetch.min.bytes': 1,           
+            'fetch.wait.max.ms': 1,        # [修改] 配合 Zero-Copy，將 10ms 降至 1ms，毫不等待
+            'socket.nagle.disable': True,  # [修改] 關閉 Nagle 演算法，封包不准排隊
+            'fetch.error.backoff.ms': 0,   # [新增] 發生微小錯誤時立刻重試
         }
         self.consumer = Consumer(conf)
         self.logger.info(f"Connected to Kafka broker: {self.broker_url}")
@@ -52,62 +56,51 @@ class GaleKafkaConsumer:
             
         offsets_found = self.consumer.offsets_for_times(partitions, timeout=10.0)
         
-        # [Fix] Batch Assignment
         to_assign = []
         for tp in offsets_found:
             to_assign.append(tp)
         
-        # Assign ALL partitions once
         if to_assign:
             self.consumer.assign(to_assign)
             
-        # Then seek
         for tp in offsets_found:
             if tp.offset != -1:
                 self.consumer.seek(tp)
                 self.logger.info(f"Topic {tp.topic} seek to offset {tp.offset}")
             else:
                 self.logger.warning(f"Topic {tp.topic} offset not found for time {start_dt}")
-                # Kafka 預設 behavior for assigned but not seeked? 
-                # Usually it resumes from last committed or auto.offset.reset
-                # We already assigned it, so it's fine.
 
     def close(self):
         if self.consumer:
             self.consumer.close()
             self.logger.info("Kafka Consumer closed.")
-            self.consumer = None # Ensures idempotency
+            self.consumer = None 
 
 
     async def consume_stream(self, batch_size: int = 500, running_check: Callable[[], bool] = None):
         """
         Async Generator: 持續產生訊息列表 (Batch processing)。
         配合外部的 UVLOOP 運行。
-        Args:
-            batch_size: 批次大小
-            running_check: 用於檢查是否該停止迴圈的 callback
         """
         if not self.consumer:
             raise RuntimeError("Consumer not connected.")
 
         self.logger.info(f"Starting async consumption loop (Batch Size: {batch_size})...")
-        
-        # 使用 asyncio.get_event_loop().run_in_executor 來避免 poll 阻塞主線程
         loop = asyncio.get_running_loop()
+
+        # [新增] 進入熱徑前，強制關閉垃圾回收機制，避免盤中快市時發生 Latency Spike
+        gc.disable()
+        self.logger.info("⚡ Garbage Collection disabled for Hot Path.")
 
         try:
             while True:
-                # 每次迴圈開始前檢查是否該停止
                 if running_check and not running_check():
                     self.logger.info("Running check returned False. Stopping loop.")
                     break
                     
-                # 使用 consume 批次獲取，大幅減少 Context Switch
-                # run_in_executor 仍然是必要的，因為 consume 在 C 層面是 blocking 的
                 msgs = await loop.run_in_executor(None, self.consumer.consume, batch_size, 0.1)
 
                 if not msgs:
-                    # 沒訊息，回傳空陣列讓外部有機會計算 idle timeout
                     yield []
                     continue
                 
@@ -120,22 +113,24 @@ class GaleKafkaConsumer:
                             self.logger.error(f"Kafka Error: {msg.error()}")
                             continue
                     
-                    # 收集有效訊息
                     valid_batch.append(msg)
                 
-                # 就算 valid_batch 是空的，也 yield 出去，以便外部計算 idle
                 yield valid_batch
 
         except asyncio.CancelledError:
             self.logger.info("Consumption loop cancelled.")
         finally:
             self.close()
+            # [新增] 退出熱徑迴圈後，恢復垃圾回收並手動清理一次
+            gc.enable()
+            gc.collect()
+            self.logger.info("🧹 Garbage Collection re-enabled and memory cleaned.")
 
 
-    # 歷史區間消費模式
     async def consume_history(self, start_dt: datetime, end_dt: datetime):
         """
         歷史回測模式：讀取 [start_dt, end_dt] 區間內的數據。
+        (此處刻意不關閉 GC，因為歷史回補會瞬間產生海量物件，需讓 GC 正常運作避免 OOM)
         """
         if not self.consumer: raise RuntimeError("Not connected")
         
@@ -144,14 +139,11 @@ class GaleKafkaConsumer:
         
         self.logger.info(f"📜 History Mode: {start_dt} ~ {end_dt}")
 
-        # 1. 準備 Partitions
         partitions = [TopicPartition(t, 0) for t in self.topics]
         
-        # 2. 查找起點
         for p in partitions: p.offset = start_ts
         start_offsets = self.consumer.offsets_for_times(partitions)
         
-        # 3. 查找終點
         for p in partitions: p.offset = end_ts
         end_offsets = self.consumer.offsets_for_times(partitions)
         
@@ -159,20 +151,15 @@ class GaleKafkaConsumer:
         
         for tp in end_offsets:
             if tp.offset != -1:
-                # 情況 A: 找到了具體的結束 Offset (代表資料在該時間點之後還有更多)
                 end_offset_map[tp.topic] = tp.offset
             else:
-                # 情況 B: 沒找到 (回傳 -1)，代表請求的結束時間比最新的資料還晚
-                # ⚡️ 修正：查詢該 Partition 的 High Watermark (最末端 Offset)
                 try:
-                    # get_watermark_offsets 回傳 (low, high) tuple
                     _, high_watermark = self.consumer.get_watermark_offsets(tp)
                     end_offset_map[tp.topic] = high_watermark
                     self.logger.info(f"Topic {tp.topic} end time > latest data. Set end offset to High Watermark: {high_watermark}")
                 except Exception as e:
                     self.logger.error(f"Failed to get watermark for {tp.topic}: {e}")
 
-        # 4. 定位到起點 (Seek)
         to_assign = []
         for tp in start_offsets:
             if tp.offset != -1:
@@ -188,11 +175,9 @@ class GaleKafkaConsumer:
         for tp in to_assign:
             self.consumer.seek(tp)
 
-        # 5. 全速讀取迴圈
         loop = asyncio.get_running_loop()
         BATCH_SIZE = 2000
         
-        # 確保 active_topics 是基於起點存在的 Topic，且我們知道終點在哪
         active_topics = set([tp.topic for tp in to_assign if tp.topic in end_offset_map])
         
         idle_count = 0
@@ -202,7 +187,7 @@ class GaleKafkaConsumer:
                 
                 if not msgs:
                     idle_count += 1
-                    if idle_count > 30: # 30 * 0.1 = 3 seconds idle
+                    if idle_count > 30:
                         self.logger.info(f"⏳ No more historical data (Idle timeout). Forcing completion.")
                         break
                     continue
@@ -215,7 +200,6 @@ class GaleKafkaConsumer:
                     topic = msg.topic()
                     offset = msg.offset()
                     
-                    # 檢查是否達到終點
                     if topic in end_offset_map and offset >= end_offset_map[topic]:
                         if topic in active_topics:
                             active_topics.remove(topic)
