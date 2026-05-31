@@ -51,7 +51,22 @@ graph LR
     Dashboard --> Browser["Web UI"]
 ```
 
+### 🎯 設計哲學：物理隔離與效能解耦
+
+當上游管線（`txf-streaming-server`）的行情處理延遲已壓縮至 **8 微秒 (μs)** 後，系統效能撞上了兩道「物理與視覺」的最終邊界，Gale Engine 的整體架構設計正是為了在這兩道邊界之間取得最優解：
+
+#### 1. WAN 物理極限 (Speed of Light)
+從台灣期交所/券商機房經由廣域網路 (WAN) 抵達本地路由器，物理傳輸時間通常落在 **2ms ~ 5ms**。這道「光速瓶頸」無法打破，因此後端管線的核心設計目標只有一個：**「絕對不對原始行情疊加任何本地軟體延遲」**，確保行情抵達後在 8μs 內完成指標計算並寫入共享記憶體，實現零本地損耗。
+
+#### 2. UI 渲染解耦 (Screen Refresh Rate)
+人類肉眼與主流螢幕的更新率為 60Hz (每幀 16.6ms) 或 144Hz (每幀 6.9ms)。要求前端儀表板跟隨 8μs 的後端速度逐筆重繪，不僅毫無意義，更會引發 CPU 渲染風暴 (Render Storm)。因此本系統實作了**「雙迴圈非同步架構」**：
+
+- **資料全速狂奔：** `gale.feed` 不受 UI 任何影響，以極限速度持續將 Tick 與指標矩陣寫入 `SharedRingBuffer`。
+- **前端定時抽樣 (Decimation)：** `gale.dashboard` 透過獨立定時器，僅在重繪瞬間去記憶體讀取最新快照，與後端速度完全解耦。**UI 更新週期固定為 2 秒 (`interval=2000ms`)**，此為刻意設計的架構決策：頻率過高（如 < 1s）會因 `Scattergl` 連續全量繪製引發 CPU 渲染風暴 (Render Storm)；2 秒恰好契合本系統最小決策 Timeframe（5 秒）的 2.5 倍安全邊際，視覺足夠流暢且不對瀏覽器造成壓力。
+- **WebGL 全量重繪：** 全面採用 `go.Scattergl`（WebGL GPU 渲染），每次 Callback 觸發時重建完整 Figure，由 GPU 負責渲染大量數據點，將 CPU 渲染開銷壓縮至最低。
+
 -----
+
 
 ## 🛠️ 安裝與設定 (Setup)
 
@@ -81,7 +96,7 @@ uv pip install -r requirements.txt
 
 ## 🚀 如何執行 (Usage)
 
-V1.0 版本統一使用 `bin.run_supervisor` 作為入口：
+V2.0 版本統一使用 `bin.run_supervisor` 作為入口：
 
 ### 1. 實時監控模式 (Live Mode)
 
@@ -177,9 +192,9 @@ python -m bin.run_supervisor --mode history --date 2026-01-17 --session night
 
 | Argument | Value | Description |
 | :--- | :--- | :--- |
-| **`--source`** | `kafka` | **Kafka 來源**。連線至 Broker 進行實時行情監控。 |
-| | `parquet` (**Default**) | **Parquet 來源**。從歷史檔案載入進行回測或分析。 |
-| **`--speed`** | `0` (**Default**) | **極速載入 (Instant)**。自動全速載入資料 (Static Analysis)。 |
+| **`--source`** | `kafka` (**Default**) | **Kafka 來源**。連線至 Broker 進行實時行情監控。 |
+| | `parquet` | **Parquet 來源**。從歷史檔案載入進行回測或分析。若提供 `--date` 但未指定 `--source`，系統會自動切換至 Parquet 模式。 |
+| **`--speed`** | `0` (**Parquet Default**) | **極速載入 (Instant)**。Parquet 模式下全速載入 (Static Analysis)。此參數僅對 Parquet 模式有效。 |
 | | `1.0` | **即時模擬 (Realtime)**。依據歷史時間間隔播放，模擬盤中節奏。 |
 | | `> 1.0` | **倍速播放 (Fast Forward)**。例如 `5.0` 代表 5 倍速快轉。 |
 | `--date` | `YYYY-MM-DD` | 指定回放起始日期 (Parquet Mode 必填)。 |
@@ -208,6 +223,7 @@ txf-gale-engine/
 ├── tools/              # 🔧 實用工具
 │   ├── batch_export_html.py   # 自動批次 HTML 匯出工具
 │   └── batch_export_bidask.py # 自動批次五檔資料匯出工具
+├── scratch/            # 🧪 開發分析腳本 (非正式)
 ├── snapshots/          # 📸 匯出的 HTML 圖表快照
 ├── data_schemas/       # 📝 Protobuf 定義
 ├── Notes/              # 📚 開發筆記
