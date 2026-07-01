@@ -3,6 +3,10 @@
 # 設定資料根目錄
 DATA_ROOT = "D:/txf-data"
 
+# 批次匯出 HTML 快照的存放根目錄(可被 batch_export --out-dir 覆寫)。
+# 快照是「可重生的衍生快取」(source 為 DATA_ROOT 的 parquet),故獨立於 repo、放 D 槽。
+SNAPSHOT_ROOT = "D:/txf-snapshot"
+
 # [Central Config] 共享記憶體預設容量 (筆數)
 SHM_CAPACITY = 400000
 

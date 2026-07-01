@@ -96,7 +96,7 @@ python tools/batch_export_html.py --start-date 2025-12-06 --session night --sour
 
 * **來源預設**：`kafka` → `both`（日夜各自出檔）；`parquet` → `full`（全日盤）。
 * **full 自動跳週末**：週一 parquet 檔已含上週五夜盤，工作日即完整涵蓋；`night/day/both` 不跳。
-* 假日/缺檔自動略過（印 warning 不中斷）。存至 `snapshots/`，檔名帶盤別後綴：`FD`=全日 / `0N`=夜 / `0D`=日，`_p`=parquet（如 `TXF-Chart-2025-12-01-FD_p.html`）。
+* 假日/缺檔自動略過（印 warning 不中斷）。輸出至 `config.SNAPSHOT_ROOT`（預設 `D:\txf-snapshot`，可用 `--out-dir` 覆寫），依 **年/月** 分層。檔名帶盤別後綴：`FD`=全日 / `0N`=夜 / `0D`=日，`_p`=parquet（如 `2025\12\TXF-Chart-2025-12-01-FD_p.html`）。快照為可重生的衍生快取,不進 repo。
 
 ### 批次匯出五檔 (`tools/batch_export_bidask.py`)
 
@@ -130,7 +130,6 @@ txf-daytradedash/
 ├── gale/               # 核心套件 (infra / feed / alpha / strategy / dashboard)
 ├── config/             # 系統配置
 ├── tools/              # batch_export_html.py / batch_export_bidask.py
-├── snapshots/          # 匯出的 HTML 圖表快照
 ├── data_schemas/       # Protobuf 定義
 └── README.md
 ```

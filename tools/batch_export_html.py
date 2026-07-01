@@ -16,7 +16,7 @@ from gale.alpha.manager import IndicatorManager
 from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.data_model import get_last_value
 from gale.dashboard.ui_utils import create_html_scoreboard_string
-from config.settings import DATA_ROOT, PREV_CLOSE_PRICE, SHM_CAPACITY
+from config.settings import DATA_ROOT, PREV_CLOSE_PRICE, SHM_CAPACITY, SNAPSHOT_ROOT
 
 # 修正 Windows 下 cp950 無法印出 emoji 的問題
 if sys.stdout.encoding != 'utf-8':
@@ -97,7 +97,7 @@ def export_html(date_str, suffix, fig, sb_data, output_dir):
     logger.info(f"💾 Saved HTML to: {filepath}")
 
 
-def process_date(date_str, session, source, broker, group, base_topic):
+def process_date(date_str, session, source, broker, group, base_topic, out_dir_base):
     logger.info(f"==== Processing {date_str} ({session}) via {source} ====")
     
     run_id = f"batch_{datetime.now().strftime('%H%M%S')}"
@@ -249,7 +249,9 @@ def process_date(date_str, session, source, broker, group, base_topic):
         if source == "parquet":
             actual_suffix += "_p"
             
-        output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "snapshots")
+        # 依年/月分層存放(比照 data lake 慣例),便於日後 review。actual_date_str = YYYY-MM-DD。
+        _y, _m = actual_date_str[:4], actual_date_str[5:7]
+        output_dir = os.path.join(out_dir_base, _y, _m)
         export_html(actual_date_str, actual_suffix, fig, sb_data, output_dir)
     else:
         logger.warning(f"No ticks processed for {date_str} {session}. Skipping HTML.")
@@ -272,6 +274,8 @@ def main():
     parser.add_argument("--session", choices=["day", "night", "both", "full"], default=None,
                         help="day / night / both(各自出檔) / full(夜+日同框)。未指定時:parquet→full、kafka→both")
     parser.add_argument("--source", choices=["parquet", "kafka"], default="kafka", help="Data source")
+    parser.add_argument("--out-dir", default=None,
+                        help=f"HTML 快照輸出根目錄,依年/月分層。未指定時用 config.SNAPSHOT_ROOT ({SNAPSHOT_ROOT})")
     parser.add_argument("--broker", default="192.168.1.50:9092", help="Kafka broker")
     parser.add_argument("--group", default="gale_batch_html", help="Kafka group")
     parser.add_argument("--topic", default="txf-tick", help="Base topic name")
@@ -301,11 +305,14 @@ def main():
 
     sessions = ["day", "night"] if args.session == "both" else [args.session]
 
-    logger.info(f"Starting Batch Export: {len(dates)} days, {len(sessions)} sessions per day. Source: {args.source}")
-    
+    out_dir_base = args.out_dir or SNAPSHOT_ROOT
+
+    logger.info(f"Starting Batch Export: {len(dates)} days, {len(sessions)} sessions per day. "
+                f"Source: {args.source}. Out: {out_dir_base}\\<YYYY>\\<MM>")
+
     for d in dates:
         for s in sessions:
-            process_date(d, s, args.source, args.broker, args.group, args.topic)
+            process_date(d, s, args.source, args.broker, args.group, args.topic, out_dir_base)
 
     logger.info("🎉 All batch exports completed successfully!")
 
