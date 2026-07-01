@@ -62,8 +62,8 @@ def build_combined_figure(data):
     # 1. 建立子圖框架 (3 Rows)
     # shared_xaxes=True: 上下圖共用 X 軸縮放
     fig = make_subplots(
-        rows=3, cols=1, 
-        shared_xaxes=True, 
+        rows=3, cols=1,
+        shared_xaxes=True,
         vertical_spacing=0.03,
         row_heights=[0.5, 0.25, 0.25],     # 高度比例 5:2.5:2.5
         specs=[
@@ -137,6 +137,19 @@ def build_combined_figure(data):
     # 在 overlay 結束後繪製線條間填色，順序需在線條之後 (tonexty 依賴順序)
     renderers.add_regime_band_fills(fig, data, VWAP_MULTIPLIERS, hidden_zones=DEFAULT_OFF_LEGENDS, row=1, col=1)
 
+    # 盤間空檔(夜→日、週末、假日)切斷副圖折線/填色,與主圖同一組 breaks。
+    # CVD/COFI/COBI 用 fill='tozeroy',遇 NaN 會就地斷開(不像 tonexty 會塞中央),安全。
+    _osc_breaks = data.get('session_breaks') or []
+    def _break_series(arr):
+        if not _osc_breaks:
+            return arr
+        arr = np.asarray(arr, dtype='float64').copy()
+        _n = len(arr)
+        for _b in _osc_breaks:
+            if 0 <= int(_b) < _n:
+                arr[int(_b)] = np.nan
+        return arr
+
     # ---------------------------------------------------------
     # Row 2: Oscillators (副圖指標)
     # ---------------------------------------------------------
@@ -149,9 +162,9 @@ def build_combined_figure(data):
         base_id = ind_id.replace('_TF', '')
 
         # All OS_CILLATORS (including the dynamically resolved TF ones) are natively aligned to tick_x via data['history']
-        y_data = data['history'][ind_id][data['start_idx']::data['step']]
+        y_data = _break_series(data['history'][ind_id][data['start_idx']::data['step']])
         x_data = data['tick_x']
-        
+
         # 動態分派 Renderer (Dynamic Dispatch)
         method_name = f"render_{base_id.lower()}"
         renderer = getattr(renderers.OscillatorRenderers, method_name, None)
@@ -171,13 +184,13 @@ def build_combined_figure(data):
     if 'obi' in data['history']:
         # [Refactor] 數據已在 state.py 完成預先累加 (State Metric)
         # 這裡直接切片顯示即可。
-        plot_cum_obi = data['history']['obi'][data['start_idx']::data['step']]
+        plot_cum_obi = _break_series(data['history']['obi'][data['start_idx']::data['step']])
         renderers.OscillatorRenderers.render_obi(fig, x_data, plot_cum_obi, {'id': 'CumOBI', 'name': 'COBI', 'color': '#00FFFF'}, row=3, col=1)
 
     # Render OFI (Right Axis)
     if 'ofi' in data['history']:
         # [Refactor] 直接切片
-        plot_cum_ofi = data['history']['ofi'][data['start_idx']::data['step']]
+        plot_cum_ofi = _break_series(data['history']['ofi'][data['start_idx']::data['step']])
         renderers.OscillatorRenderers.render_ofi(fig, x_data, plot_cum_ofi, {'id': 'CumOFI', 'name': 'COFI', 'color': '#FFD700'}, row=3, col=1)
 
 
@@ -319,7 +332,7 @@ def build_combined_figure(data):
             side='left',
             showgrid=False,
             showticklabels=False, # 隱藏數值避免雜亂，由 Tooltip 顯示即可
-            range=[0, vol_max * 5] if vol_max > 0 else [0, 10], 
+            range=[0, vol_max * 5] if vol_max > 0 else [0, 10],
             fixedrange=True # 不隨縮放改變 y 軸比例 (保持 Bars 在底部)
         )
     )
@@ -338,7 +351,22 @@ def build_combined_figure(data):
     # I should update `renderers.py` first to be safe? Or just patch it now?
     # I'll update `renderers.py` in the NEXT step (fixing the x3 conflict).
     # For now, let's write `chart.py` using `xaxis4` in layout, and I will fix renderer after.
-    
+
+    # [Rangebreaks] 用「實際資料的空檔」收合,不用固定小時 pattern——這樣每日盤間空檔、**週末、假日**
+    # 全部通吃(固定小時 pattern 收不掉週末:週末那些「交易時段」根本沒資料,pattern 會留一堆空白)。
+    # 空檔位置 = data['session_breaks'](相鄰時間差 > GAP_BREAK_MS);每段收掉 (前一點, 後一點),
+    # 兩端各留 30s 不動到真實資料點。
+    _breaks = data.get('session_breaks') or []
+    _tx = data.get('tick_x')
+    _rb = []
+    if _tx is not None and len(_tx) and len(_breaks):
+        for _bi in _breaks:
+            if 1 <= _bi < len(_tx):
+                _a = np.datetime64(_tx[_bi - 1]) + np.timedelta64(30, 's')
+                _b = np.datetime64(_tx[_bi]) - np.timedelta64(30, 's')
+                if _b > _a:
+                    _rb.append(dict(bounds=[str(_a), str(_b)]))
+
     fig.update_xaxes(
         # 1. 網格與標籤
         showgrid=True,
@@ -354,10 +382,23 @@ def build_combined_figure(data):
         spikedash='dash',
         spikecolor='rgba(255, 255, 255, 0.5)',
         spikethickness=0.5,
+
+        # [Rangebreaks] 收合非交易時段,讓夜/日 K 棒直接接續(像 TradingView 連續圖)。
+        # 用「實際資料空檔」(_rb,見上方)而非固定小時 pattern——每日盤間空檔、週末、假日通吃。
+        rangebreaks=_rb,
     )
     
     # Fix for VP Axis (x4)
     # Ensure it doesn't show spikes (cleaner)
     fig.update_layout(xaxis4=dict(matches=None, showspikes=False))
-    
+
+    # [Session Divider] 換盤處(full 模式:日盤開盤)畫一條淡的垂直分隔線,貫穿所有子圖。
+    # rangebreaks 收合空檔後,這條線正好落在夜/日接縫——日盤 σ 從這裡重新張開,一眼認出換盤。
+    _breaks = data.get('session_breaks') or []
+    _tx = data.get('tick_x')
+    if _tx is not None and len(_breaks):
+        for _bi in _breaks:
+            if 0 <= _bi < len(_tx):
+                fig.add_vline(x=str(_tx[_bi]), line=dict(color='rgba(255,255,255,0.22)', width=1, dash='dot'))
+
     return fig

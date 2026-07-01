@@ -97,7 +97,17 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     ind_id = ind_config['id']
     # 根據 State 計算的 Step 進行降頻繪製
     y_data = data['history'][ind_id][data['start_idx']::data['step']]
-    
+
+    # 在盤間空檔(夜→日、週末、假日)切斷折線,否則會跨空檔連一條斜線(rangebreaks 只收 x 軸空白,
+    # 折線本身仍會把相鄰兩點連起來)。色帶已在 add_regime_band_fills 用同一組 breaks 拆段。
+    _breaks = data.get('session_breaks') or []
+    if _breaks:
+        y_data = np.asarray(y_data, dtype='float64').copy()
+        _n = len(y_data)
+        for _b in _breaks:
+            if 0 <= int(_b) < _n:
+                y_data[int(_b)] = np.nan
+
     display_name = ind_config.get('name', ind_id)
     
     trace_kwargs = dict(
@@ -114,8 +124,10 @@ def add_overlay_indicator(fig, data, ind_config, row=1, col=1):
     if 'legendrank' in ind_config:
         trace_kwargs['legendrank'] = ind_config['legendrank']
     
-    # 使用 WebGL 加速渲染 (Scattergl)
-    fig.add_trace(go.Scattergl(**trace_kwargs), row=row, col=col)
+    # 用 SVG go.Scatter(非 Scattergl):Scattergl(WebGL)不支援 x 軸 rangebreaks,
+    # 一旦圖上有 rangebreaks(收合盤間空檔),所有 WebGL 折線會整條消失(COFI/COBI/VWAP…都不見)。
+    # 折線點數已降頻到 ~2000,SVG 完全負擔得起。
+    fig.add_trace(go.Scatter(**trace_kwargs), row=row, col=col)
 
 
 def _color_to_rgba(color: str, alpha: float) -> str:
@@ -148,6 +160,11 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
     start_idx = data['start_idx']
     step = data['step']
 
+    # 盤切換斷點(降頻後索引)→ 每盤各自一段。每段獨立 fill(fill 不跨盤)→ 夜/日同框時
+    # 中央價值區不會被跨盤填色塞滿。單盤模式沒有斷點 → 只有一段,行為與過去相同。
+    _breaks = data.get('session_breaks') or []
+    _seg_bounds = [0] + [int(b) for b in _breaks] + [len(tick_x)]
+
     FILL_ALPHA = 0.15
 
     def _get_y(key):
@@ -155,40 +172,34 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
             return None
         return history[key][start_idx::step]
 
-    def _add_fill_pair(lower_y, upper_y, fill_color, group_name, show_legend, name):
-        """在 lower_y 和 upper_y 之間填色 (fill=tonexty)
-        注意：必須用 go.Scatter，Scattergl (WebGL) 不支援 fill 屬性。
-        """
-        # 底線 (透明錨點) — go.Scatter 才支援 fill
-        fig.add_trace(go.Scatter(
-            x=tick_x, y=lower_y,
-            mode='lines',
-            line=dict(width=0, color='rgba(0,0,0,0)'),
-            showlegend=False,
-            legendgroup=group_name,
-            hoverinfo='skip',
-            name=f'_{name}_lo',
-        ), row=row, col=col)
-
-        # 上線 (填色至底線)
-        fig.add_trace(go.Scatter(
-            x=tick_x, y=upper_y,
-            mode='lines',
-            line=dict(width=0, color='rgba(0,0,0,0)'),
-            fill='tonexty',
-            fillcolor=fill_color,
-            showlegend=show_legend,
-            legendgroup=group_name,
-            name=name,
-            hoverinfo='skip',
-            legendrank=200 # 設定排序權重
-        ), row=row, col=col)
+    def _add_fill_pair(lower_y, upper_y, fill_color, group_name, show_legend, name, visible=True):
+        """在 lower_y 和 upper_y 之間填色 (fill=tonexty)——**按盤切換斷點拆成多段**,每段自成一塊
+        封閉填色,不跨空檔。只第一段顯示 legend。必須用 go.Scatter(Scattergl 不支援 fill)。"""
+        _first = True
+        for _a, _b in zip(_seg_bounds[:-1], _seg_bounds[1:]):
+            if _b - _a < 2:                     # 太短的段(1 點)跳過,不然填不出面積
+                continue
+            _lx = tick_x[_a:_b]
+            # 底線 (透明錨點)
+            fig.add_trace(go.Scatter(
+                x=_lx, y=lower_y[_a:_b], mode='lines',
+                line=dict(width=0, color='rgba(0,0,0,0)'),
+                showlegend=False, legendgroup=group_name, hoverinfo='skip',
+                name=f'_{name}_lo', visible=visible,
+            ), row=row, col=col)
+            # 上線 (填色至底線)
+            fig.add_trace(go.Scatter(
+                x=_lx, y=upper_y[_a:_b], mode='lines',
+                line=dict(width=0, color='rgba(0,0,0,0)'),
+                fill='tonexty', fillcolor=fill_color,
+                showlegend=(show_legend and _first), legendgroup=group_name,
+                name=name, hoverinfo='skip', legendrank=200, visible=visible,
+            ), row=row, col=col)
+            _first = False
 
     prev_sd = None
 
     for sd in multipliers:
-        color, _ = get_band_style(sd)
-        fill_color = _color_to_rgba(color, FILL_ALPHA)
         group_name = f'Zone_{sd}'
 
         bull_curr = _get_y(f'Bull_Band_{sd}')
@@ -198,43 +209,33 @@ def add_regime_band_fills(fig, data, multipliers, hidden_zones=None, row=1, col=
             prev_sd = sd
             continue
 
-        # 決定區間名稱
+        # 中心 ±1σ(value zone)不上色,只記住邊界 → cB 在 |.|<1 區留中性
         if prev_sd is None:
-            zone_name = f'σ 1.0'
-        else:
-            is_last = (sd == multipliers[-1])
-            zone_name = f'σ {prev_sd}+' if is_last else f'σ {prev_sd}-{sd}'
+            prev_sd = sd
+            continue
 
-        # 檢查此 Zone 是否預設隱藏
+        # 環形帶顏色用「外緣 sd」對應色:1~2σ→黃(BAND_2)/2σ+→紅(BAND_3);中心 <1σ 留空(中性)
+        color, _ = get_band_style(sd)
+        fill_color = _color_to_rgba(color, FILL_ALPHA)
+
+        is_last = (sd == multipliers[-1])
+        zone_name = f'σ {prev_sd}+' if is_last else f'σ {prev_sd}-{sd}'
         is_hidden = (hidden_zones is not None and zone_name in hidden_zones)
         visible_state = 'legendonly' if is_hidden else True
 
-        if prev_sd is None:
-            # 最內層：Bear_Band_1 到 Bull_Band_1（整個中心帶）
-            _add_fill_pair(bear_curr, bull_curr, fill_color, group_name,
-                           show_legend=True, name=zone_name)
-            # 設定初始可見度
-            fig.data[-1].visible = visible_state
-            fig.data[-2].visible = visible_state
-        else:
-            # 環形帶：Bull 側 + Bear 側，同一 legendgroup
-            bull_prev = _get_y(f'Bull_Band_{prev_sd}')
-            bear_prev = _get_y(f'Bear_Band_{prev_sd}')
-            if bull_prev is None or bear_prev is None:
-                prev_sd = sd
-                continue
+        bull_prev = _get_y(f'Bull_Band_{prev_sd}')
+        bear_prev = _get_y(f'Bear_Band_{prev_sd}')
+        if bull_prev is None or bear_prev is None:
+            prev_sd = sd
+            continue
 
-            # Bull 側 (向上，顯示 legend)
-            _add_fill_pair(bull_prev, bull_curr, fill_color, group_name,
-                           show_legend=True, name=zone_name)
-            fig.data[-1].visible = visible_state
-            fig.data[-2].visible = visible_state
+        # Bull 側 (向上，顯示 legend)。visible 直接傳進去,每段每條都會套用(不再只改最後一段)。
+        _add_fill_pair(bull_prev, bull_curr, fill_color, group_name,
+                       show_legend=True, name=zone_name, visible=visible_state)
 
-            # Bear 側 (向上，不重複顯示 legend)
-            _add_fill_pair(bear_curr, bear_prev, fill_color, group_name,
-                           show_legend=False, name=f'_{zone_name}_bear')
-            fig.data[-1].visible = visible_state
-            fig.data[-2].visible = visible_state
+        # Bear 側 (不重複顯示 legend)
+        _add_fill_pair(bear_curr, bear_prev, fill_color, group_name,
+                       show_legend=False, name=f'_{zone_name}_bear', visible=visible_state)
 
         prev_sd = sd
 
@@ -264,7 +265,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, visib
         
         for price, color, name, style in levels:
             if price > 0:
-                fig.add_trace(go.Scattergl(
+                fig.add_trace(go.Scatter(
                     x=[x_start, x_end], 
                     y=[price, price],
                     mode='lines',
@@ -317,7 +318,7 @@ def add_volume_profile(fig, vp_data, bin_size, legend_group, x_range=None, visib
             y=prices,
             x=buy_vols,
             orientation='h',
-            xaxis='x4',     # [Fix] Use X4 for VP to avoid conflict with Row 3 (X3)
+            xaxis='x4',     # [Fix] Use X4
             yaxis='y',
             name='VP Buy Vol',
             width=bin_size * 0.95,
@@ -362,7 +363,7 @@ class OscillatorRenderers:
         ind_id = config['id']
         
         # 主線
-        fig.add_trace(go.Scattergl(
+        fig.add_trace(go.Scatter(
             x=x_data, y=y_data, mode='lines', name=ind_id,
             line=dict(color=config['color'], width=1.0), 
             legendgroup=group_name, showlegend=True, legendrank=200,
@@ -374,8 +375,8 @@ class OscillatorRenderers:
         y_neg = np.minimum(0, y_data)
         common_fill = dict(mode='lines', line=dict(width=0), fill='tozeroy', fillcolor='rgba(255, 215, 0, 0.05)', hoverinfo='skip', legendgroup=group_name, showlegend=False, legendrank=200)
         
-        fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
-        fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
+        fig.add_trace(go.Scatter(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
+        fig.add_trace(go.Scatter(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
 
     @staticmethod
     def render_small_lot(fig, x_data, y_data, config, row, col):
@@ -419,7 +420,7 @@ class OscillatorRenderers:
         group_name = "OBI"
         
         # Main Line
-        fig.add_trace(go.Scattergl(
+        fig.add_trace(go.Scatter(
             x=x_data, y=y_data, 
             mode='lines', 
             name=config.get('name', 'COBI'),
@@ -444,8 +445,8 @@ class OscillatorRenderers:
             legendrank=250
         )
         
-        fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=False)
-        fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=False)
+        fig.add_trace(go.Scatter(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=False)
+        fig.add_trace(go.Scatter(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=False)
         
 
 
@@ -458,7 +459,7 @@ class OscillatorRenderers:
         group_name = "OFI"
         
         # Main Line
-        fig.add_trace(go.Scattergl(
+        fig.add_trace(go.Scatter(
             x=x_data, y=y_data,
             mode='lines',
             name=config.get('name', 'COFI'),
@@ -477,12 +478,12 @@ class OscillatorRenderers:
             line=dict(width=0), 
             fill='tozeroy', 
             fillcolor='rgba(255, 215, 0, 0.1)', # Gold tint
-            hoverinfo='skip', 
-            legendgroup=group_name, 
+            hoverinfo='skip',
+            legendgroup=group_name,
             showlegend=False,
             legendrank=240
         )
-        
-        fig.add_trace(go.Scattergl(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
-        fig.add_trace(go.Scattergl(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
+
+        fig.add_trace(go.Scatter(x=x_data, y=y_pos, **common_fill), row=row, col=col, secondary_y=True)
+        fig.add_trace(go.Scatter(x=x_data, y=y_neg, **common_fill), row=row, col=col, secondary_y=True)
 

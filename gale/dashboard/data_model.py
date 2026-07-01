@@ -14,9 +14,14 @@ gale.dashboard.data_model.py
 import bisect
 import numpy as np
 from config.settings import TIMEFRAMES
-from config.indicator_config import INDICATORS_SETUP, VWAP_MULTIPLIERS
+from config.indicator_config import INDICATORS_SETUP, VWAP_MULTIPLIERS, BAND_WARMUP_VOL
 
 VP_BIN_SIZE = 1 # Volume Profile 價格分箱大小 (點)
+
+# 盤間斷層門檻:相鄰 tick 時間差 > 此值 → 視為換盤/資料斷層,在該處切斷色帶與 U/L-Cost 線,
+# 避免 Plotly fill='tonexty' 跨越空白時段直接連線/填色(parquet 夜盤+日盤同框時的三角形 artifact)。
+# 30 分鐘:安全高於盤中最長靜默、低於最短盤間休息(日→夜 75 分、夜→日 225 分)。
+GAP_BREAK_MS = 30 * 60 * 1000
 
 def get_last_value(history_dict: dict, key: str, default=0):
     """
@@ -45,31 +50,31 @@ def _safe_calculate_vwap(view_history, pv_key, vol_key, default_arr):
         return res
     return default_arr # Should not happen if keys exist
 
-def _calculate_regime_bands(view_history, vwap_arr, pv_sq_key, vol_key, suffix_name, multipliers):
-    """
-    Helper to calculate and set Regime StdDev Bands.
+def _calculate_regime_bands(view_history, vwap_center, side_mean, pv_sq_key, vol_key, suffix_name, multipliers):
+    """[改] 以 session VWAP 為中心 + 半邊σ(σ 繞 VWAP) 的 regime 色塊 = cB 分區。
+    原本錨定在 U/L-Cost 且 σ 繞 U/L-Cost；現改為錨定 session VWAP、σ 繞 VWAP，
+    使色塊位置直接等於 cB(價在 Bull_Band_2.0 ⟺ cB=+2)。
+      半邊變異數 = E[p^2]_side - 2*VWAP*E[p]_side + VWAP^2
     """
     if pv_sq_key in view_history and vol_key in view_history:
         pv_sq = view_history[pv_sq_key]
         vol = view_history[vol_key]
-        
-        # Variance = E[X^2] - (E[X])^2
+
         mean_sq = np.zeros_like(pv_sq)
         valid = vol > 0
         np.divide(pv_sq, vol, out=mean_sq, where=valid)
-        
-        variance = mean_sq - (vwap_arr * vwap_arr)
+
+        # 繞 session VWAP 的半邊變異數(side_mean = 該邊的 E[p] = U/L-Cost)
+        variance = mean_sq - 2.0 * vwap_center * side_mean + (vwap_center * vwap_center)
         variance[variance < 0] = 0.0
         std_dev = np.sqrt(variance)
-        
-        # Output Bands
+
+        # Output Bands(錨定在 session VWAP)
         for mult in multipliers:
-            # Upper Regime -> Add Bands (Resistance)
             if 'Bull' in suffix_name:
-                    view_history[f'{suffix_name}_Band_{mult}'] = vwap_arr + (std_dev * mult)
-            # Lower Regime -> Subtract Bands (Support)
+                view_history[f'{suffix_name}_Band_{mult}'] = vwap_center + (std_dev * mult)
             else:
-                    view_history[f'{suffix_name}_Band_{mult}'] = vwap_arr - (std_dev * mult)
+                view_history[f'{suffix_name}_Band_{mult}'] = vwap_center - (std_dev * mult)
 
 def process_market_data(indicator_manager, lookback_count, timeframe):
     """
@@ -261,25 +266,43 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
                 view_history[f'VWAP_Lower_{sd}'] = vwap - (std_dev * sd)
 
         
-        # [Fractal VWAP Calculation]
-        # Retrieve Cumulative Arrays from View History
-        # Note: These keys must match what is in IndicatorManager.history
-        
-        # [Fractal VWAP Calculation]
-        # Retrieve Cumulative Arrays from View History
-        # Note: These keys must match what is in IndicatorManager.history
-
-        # Level 1
+        # 各邊平均價 E[p](= U-Cost / L-Cost):既當半邊σ 一階項,也輸出成線(只線、不影響色塊)
         vwap_up = _safe_calculate_vwap(view_history, 'cum_up_pv', 'cum_up_vol', vwap)
         vwap_down = _safe_calculate_vwap(view_history, 'cum_dn_pv', 'cum_dn_vol', vwap)
-        
         view_history['Fractal_U'] = vwap_up
         view_history['Fractal_L'] = vwap_down
-        
-        # Calculate Regime Bands (Bull/Bear)
-        _calculate_regime_bands(view_history, vwap_up, 'cum_up_pv_sq', 'cum_up_vol', 'Bull', VWAP_MULTIPLIERS)
-        _calculate_regime_bands(view_history, vwap_down, 'cum_dn_pv_sq', 'cum_dn_vol', 'Bear', VWAP_MULTIPLIERS)
 
+        # Calculate Regime Bands (Bull/Bear)
+        # [改] regime 色塊改以 session VWAP 為中心 + 半邊σ(繞 VWAP) → 色塊位置 = cB 分區
+        # (vwap_up / vwap_down 即各邊的 E[p] = U-Cost / L-Cost，當作半邊變異數的一階項)
+        _calculate_regime_bands(view_history, vwap, vwap_up, 'cum_up_pv_sq', 'cum_up_vol', 'Bull', VWAP_MULTIPLIERS)
+        _calculate_regime_bands(view_history, vwap, vwap_down, 'cum_dn_pv_sq', 'cum_dn_vol', 'Bear', VWAP_MULTIPLIERS)
+
+        # 開盤暖身 guard:該邊累積量未達門檻前 σ 不穩(色塊爆寬/跳)→ 該邊色塊設 NaN 不畫。
+        # 用 session-anchored 累積量判定(已重置),與 viewport 無關 → 只在真開盤觸發。
+        if 'cum_up_vol' in view_history:
+            warm_up = view_history['cum_up_vol'] < BAND_WARMUP_VOL
+            for _m in VWAP_MULTIPLIERS:
+                _k = f'Bull_Band_{_m}'
+                if _k in view_history:
+                    view_history[_k] = np.where(warm_up, np.nan, view_history[_k])
+        if 'cum_dn_vol' in view_history:
+            warm_dn = view_history['cum_dn_vol'] < BAND_WARMUP_VOL
+            for _m in VWAP_MULTIPLIERS:
+                _k = f'Bear_Band_{_m}'
+                if _k in view_history:
+                    view_history[_k] = np.where(warm_dn, np.nan, view_history[_k])
+
+        # (跨盤填塞不在這裡以 NaN 切單一 trace——那對 full 模式的中央填塞無效。改由繪製端「每盤拆成
+        #  獨立 fill trace」根治;所需的盤切換斷點索引見下方 session_breaks。)
+
+
+    # 6.5 盤切換斷點(降頻後的 rendered 索引):相鄰時間差 > GAP_BREAK_MS = 換盤/資料斷層。
+    # 供繪製端把每盤色帶/線拆成各自獨立 trace(fill 不跨盤→中央不填塞)+ 畫換盤分隔線。
+    # 用 timestamps_slice(=已 [::step] 降頻的 x),與 rendered 序列 history[key][0::step] 同長對齊。
+    session_breaks = []
+    if len(timestamps_slice) > 1:
+        session_breaks = (np.where(np.diff(np.asarray(timestamps_slice, dtype=np.int64)) > GAP_BREAK_MS)[0] + 1).tolist()
 
     # 7. 計算預設縮放範圍 (Auto-Range)
     if len(tick_x_axis) > 0:
@@ -305,6 +328,7 @@ def process_market_data(indicator_manager, lookback_count, timeframe):
         'start_idx': 0, # Since we sliced, start is relative 0
         'step': step,
         'history': view_history,
+        'session_breaks': session_breaks,   # 降頻後 rendered 索引:換盤/斷層處(拆 trace + 分隔線用)
         'raw_len': raw_len,
         'default_range': default_range,
         'timeframe': tf_key,

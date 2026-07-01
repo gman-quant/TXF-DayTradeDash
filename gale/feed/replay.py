@@ -24,7 +24,7 @@ except ImportError:
     logger.error("❌ Polars not installed. Please run: pip install polars")
     sys.exit(1)
 
-def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=SHM_CAPACITY, prev_close=0.0, tse_prev_close=0.0, run_id=None):
+def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, capacity=SHM_CAPACITY, prev_close=0.0, tse_prev_close=0.0, run_id=None, session="full"):
     """
     Parquet 回放器主邏輯 (Multi-Day Support)
     Args:
@@ -75,7 +75,23 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
         required_cols = ['timestamp', 'price', 'volume']
         if 'tick_type' not in df.columns:
             df = df.with_columns(pl.lit(0).alias('tick_type')) # default 0 (unknown)
-            
+
+        # [Session Filter] day / night / full。parquet 檔含整個交易日(夜+日,中間一個 >1h 盤間空檔)。
+        # 先排序、找最大 >1h 斷點(夜→日交界),再依 session 只留該盤;full 不過濾(夜+日同框)。
+        # 必須在下面 session_id / 累積量計算「之前」過濾——這樣單盤模式的累積量才是該盤自己的、
+        # 且 kafka 單盤畫面完全一致(已驗證夜盤主圖逐像素相同)。
+        df = df.sort("timestamp")
+        if session in ("day", "night") and len(df) > 1:
+            _ts = df["timestamp"].to_numpy()
+            _diff = np.diff(_ts)
+            _gi = int(np.argmax(_diff))
+            if _diff[_gi] > 3600000:          # 最大相鄰間隔 > 1h = 夜→日 交界
+                _b = _gi + 1                  # 交界後第一列 = 日盤起點
+                df = df.slice(0, _b) if session == "night" else df.slice(_b)
+                logger.info(f"🌓 Session '{session}': kept {len(df)} ticks (split at {_diff[_gi]/60000:.0f}min gap)")
+            else:
+                logger.info(f"🌓 Session '{session}': no >1h intra-day gap; keeping all {len(df)} ticks")
+
         # Add session_id for session-aware calculations
         # Assuming timestamp is in ms (UTC)
         df = df.with_columns(
@@ -112,9 +128,7 @@ def run_replay(parquet_files, topic, speed_factor=1.0, underlying_files=None, ca
             pl.when(pl.col("tick_type") == 2).then(pl.col("volume")).otherwise(0).cum_sum().over("session_id").alias("cum_sell_vol")
         ])
         
-        # Sort
-        df = df.sort("timestamp")
-            
+        # (已於 session filter 前排序,這裡不再重排)
         logger.info(f"✅ Loaded Total {len(df)} ticks. Range: {df['timestamp'][0]} ~ {df['timestamp'][-1]}")
         
     except Exception as e:
@@ -539,11 +553,14 @@ if __name__ == "__main__":
     parser.add_argument('--run-id', type=str, default=None, help="Unique Execution ID")
     # [Auto Exit]
     parser.add_argument('--auto-exit', action='store_true', help="Exit automatically when replay is completed")
-    
+    # [Session] day=只日盤 / night=只夜盤 / full=夜+日同框(過濾在 >1h 盤間斷點切)
+    parser.add_argument('--session', type=str, default='full', choices=['day', 'night', 'full'],
+                        help="Which session to load: day / night / full (night+day)")
+
     args = parser.parse_args()
     
     # We pass args to run_replay if we need, but run_replay signature is specific.
     # Let's attach args to run_replay by making it global or changing signature.
     # Actually, we can just check args in run_replay if we pass it, or just use speed_factor. 
     # I already added a check for speed_factor <= 0 in run_replay. We just need to pass args to run_replay or check speed_factor.
-    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close, args.tse_prev_close, run_id=args.run_id)
+    run_replay(args.files, args.topic, args.speed, args.underlying, args.capacity, args.prev_close, args.tse_prev_close, run_id=args.run_id, session=args.session)

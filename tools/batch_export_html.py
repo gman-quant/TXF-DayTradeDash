@@ -3,6 +3,7 @@ import sys
 import os
 import subprocess
 import time
+import numpy as np
 from datetime import datetime, timedelta
 import logging
 
@@ -128,7 +129,7 @@ def process_date(date_str, session, source, broker, group, base_topic):
         cmd = [sys.executable, "-m", "gale.feed.replay", f_txf]
         if os.path.exists(f_tse):
             cmd.extend(["--underlying", f_tse])
-        cmd.extend(["--prev-close", str(prev_close), "--tse-prev-close", str(tse_prev_close), "--capacity", str(capacity), "--topic", topic, "--speed", "0", "--run-id", run_id])
+        cmd.extend(["--prev-close", str(prev_close), "--tse-prev-close", str(tse_prev_close), "--capacity", str(capacity), "--topic", topic, "--speed", "0", "--run-id", run_id, "--session", session])
         
     elif source == "kafka":
         cmd = [sys.executable, "-m", "gale.feed.ingest", "--broker", broker, "--group", group, "--topic", topic, 
@@ -212,32 +213,38 @@ def process_date(date_str, session, source, broker, group, base_topic):
             "change": change,
             "change_pct": change_pct,
             "open_price": open_p,
-            "high": get_last_value(hist, "Session_High"),
-            "low": get_last_value(hist, "Session_Low"),
-            "vol": get_last_value(hist, "Total_Vol"),
-            "vwap": get_last_value(hist, "VWAP"),
+            # 全日 High/Low:整個 buffer 的極值。Session_High/Low 是 per-session cummax/cummin,
+            # 取整條陣列 max/min = max(夜高,日高)/min(夜低,日低) = 全交易日高低(單盤時 = 該盤高低,不變)。
+            # → full 模式夜盤那根深 V 低點不會再漏掉。
+            "high": float(np.max(hist["Session_High"])) if len(hist.get("Session_High", [])) else prev_close,
+            "low": float(np.min(hist["Session_Low"])) if len(hist.get("Session_Low", [])) else prev_close,
+            "vol": get_last_value(hist, "Total_Vol"),      # 全日總量(total_volume 累積不重置)
+            "vwap": get_last_value(hist, "VWAP"),          # 當前盤 VWAP(跟色帶一致,選項 A)
             "prev_close": prev_close,
             "underlying_price": get_last_value(hist, "Underlying_Price"),
         }
+        # basis 現貨 stale:最後一根 tick 在夜盤時段(現貨不交易,TAIEX 凍在前日收)→ 這個 basis 是
+        # 「隔夜溢價」而非即時基差 → 交給 scoreboard 用暗色標示。full 模式最後是日盤 → 不 stale、正常。
+        if "timestamp" in hist and len(hist["timestamp"]) > 0:
+            _lh = datetime.fromtimestamp(hist["timestamp"][-1] / 1000.0).hour
+            sb_data["spot_stale"] = (_lh < 8 or _lh >= 14)
         
         # Dynamic Date and Session from actual last tick timestamp
         actual_date_str = date_str
-        actual_suffix = "-0N" if session == "night" else "-1D"
-        
-        if "timestamp" in hist and len(hist["timestamp"]) > 0:
-            last_ts_ms = hist["timestamp"][-1]
-            last_dt = datetime.fromtimestamp(last_ts_ms / 1000.0)
-            
-            # Trading Day Logic
-            if last_dt.hour < 8:
-                actual_suffix = "-0N"
-                actual_date_str = last_dt.strftime("%Y-%m-%d") 
-            elif last_dt.hour >= 14:
-                actual_suffix = "-0N"
-                actual_date_str = (last_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-            else:
-                actual_suffix = "-1D"
-                actual_date_str = last_dt.strftime("%Y-%m-%d")
+        if session == "full":
+            actual_suffix = "-FD"          # Full Day = 夜+日同框
+        else:
+            actual_suffix = "-0N" if session == "night" else "-1D"
+            if "timestamp" in hist and len(hist["timestamp"]) > 0:
+                last_ts_ms = hist["timestamp"][-1]
+                last_dt = datetime.fromtimestamp(last_ts_ms / 1000.0)
+                # Trading Day Logic(依最後一根 tick 的時段判定)
+                if last_dt.hour < 8:
+                    actual_suffix = "-0N"; actual_date_str = last_dt.strftime("%Y-%m-%d")
+                elif last_dt.hour >= 14:
+                    actual_suffix = "-0N"; actual_date_str = (last_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+                else:
+                    actual_suffix = "-1D"; actual_date_str = last_dt.strftime("%Y-%m-%d")
 
         if source == "parquet":
             actual_suffix += "_p"
@@ -262,20 +269,38 @@ def main():
     parser = argparse.ArgumentParser(description="Headless HTML Batch Export")
     parser.add_argument("--start-date", required=True, help="Start Date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End Date (YYYY-MM-DD), default is start-date")
-    parser.add_argument("--session", choices=["day", "night", "both"], default="both", help="Session to export")
+    parser.add_argument("--session", choices=["day", "night", "both", "full"], default=None,
+                        help="day / night / both(各自出檔) / full(夜+日同框)。未指定時:parquet→full、kafka→both")
     parser.add_argument("--source", choices=["parquet", "kafka"], default="kafka", help="Data source")
     parser.add_argument("--broker", default="192.168.1.50:9092", help="Kafka broker")
     parser.add_argument("--group", default="gale_batch_html", help="Kafka group")
     parser.add_argument("--topic", default="txf-tick", help="Base topic name")
     
     args = parser.parse_args()
-    
+
+    # 未指定 --session 時的預設:parquet 預設「全日盤」(夜+日同框);kafka 維持 both(各自出檔,full 待 P3)。
+    if args.session is None:
+        args.session = "full" if args.source == "parquet" else "both"
+
     if not args.end_date:
         args.end_date = args.start_date
         
     dates = get_date_range(args.start_date, args.end_date)
+
+    # 【只有 full(全日盤)跳週末】full 模式下週一的 parquet 檔已含「上週五夜盤」(週末無夜盤),
+    # 跑週一~週五即完整涵蓋所有夜+日盤,週六/日直接略過。
+    # 但 night/day/both **不跳**:夜盤有時要「單獨抓週五夜盤」,而該夜盤的交易日試算在週六,
+    # 使用者會直接傳一個週六日期來抓——若在此跳掉週末就抓不到了。
+    # (平日休市的國定假日無 parquet 檔,會在 process_date 以「檔案不存在」自動略過,不需在此列舉。)
+    if args.session == "full":
+        _n_all = len(dates)
+        dates = [d for d in dates if datetime.strptime(d, "%Y-%m-%d").weekday() < 5]
+        _n_skip = _n_all - len(dates)
+        if _n_skip:
+            logger.info(f"⏭️  [full] Skipped {_n_skip} weekend day(s); {len(dates)} weekday(s) to process.")
+
     sessions = ["day", "night"] if args.session == "both" else [args.session]
-    
+
     logger.info(f"Starting Batch Export: {len(dates)} days, {len(sessions)} sessions per day. Source: {args.source}")
     
     for d in dates:

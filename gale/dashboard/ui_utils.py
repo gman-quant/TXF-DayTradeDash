@@ -90,6 +90,9 @@ def _calculate_scoreboard_logic(sb_data):
     # 台灣市場慣性：逆價差(負值)通常用綠色或黃色，這裡依建議連動
     basis_color = UI_COLOR['UP'] if basis >= 0 else UI_COLOR['DOWN']
     basis_sign = '+' if basis >= 0 else ''
+    # 夜盤:現貨凍在前日收(stale)→ 這個 basis 是隔夜溢價、非即時基差 → 用暗色標示,提醒別當即時 basis 讀。
+    if sb_data.get("spot_stale"):
+        basis_color = UI_COLOR.get('TEXT_SUB', '#888')
 
     # 開盤漲跌 (Intraday Change)
     chg_open = price - open_p

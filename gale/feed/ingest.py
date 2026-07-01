@@ -366,7 +366,7 @@ if __name__ == "__main__":
     # [Restored] History Mode Arguments
     parser.add_argument("--mode", type=str, default="live", choices=["live", "history"])
     parser.add_argument("--date", type=str, help="YYYY-MM-DD for history mode")
-    parser.add_argument("--session", type=str, default="day", choices=["day", "night"])
+    parser.add_argument("--session", type=str, default="day", choices=["day", "night", "full"])
     parser.add_argument(
         "--prev-close",
         type=float,

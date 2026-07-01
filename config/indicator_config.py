@@ -8,11 +8,12 @@ TYPE_VIRTUAL = 'virtual'       # 虛擬指標 (如 VWAP Bands)
 from config.ui_theme import UI_COLOR
 
 # 預設不顯示的指標 ID 列表 (Default Hidden)
-VWAP_MULTIPLIERS = [1.0, 2.0, 2.5, 3.0]
+VWAP_MULTIPLIERS = [1.0, 2.0, 3.0]  # 門檻=1/2(2.5 為舊 U/L-Cost 遺留,cB 空間無行為意義已砍)
+BAND_WARMUP_VOL = 100  # 開盤暖身:該邊累積量 < 此值前 σ 不穩 → 不畫該邊色塊(防開盤爆寬)
 
 DEFAULT_OFF_LEGENDS = [
     'VP',          # Volume Profile (預設隱藏)
-    'σ 2.0-2.5',   # Regime Zone (隱藏外圍色帶)
+    # σ 色塊三環(1-2/2-2.5/2.5+)預設全顯示,對齊 1/2/2.5 色階
 ]
 
 # 指標配置清單
@@ -71,11 +72,11 @@ INDICATORS_SETUP = [
         'legendrank': 131
     },
 
-    # --- Fractal VWAP (Regime-Based) ---
+    # --- U-Cost / L-Cost 線(只畫線,不影響 VWAP-為心 σ 色塊) ---
     {
         'id': 'Fractal_U',
         'type': TYPE_VIRTUAL,
-        'color': UI_COLOR['COST_LINE'], 
+        'color': UI_COLOR['COST_LINE'],
         'width': 1,
         'name': 'U-Cost',
         'legendgroup': 'VWAP_Cost_Group',
@@ -84,7 +85,7 @@ INDICATORS_SETUP = [
     {
         'id': 'Fractal_L',
         'type': TYPE_VIRTUAL,
-        'color': UI_COLOR['COST_LINE'], 
+        'color': UI_COLOR['COST_LINE'],
         'width': 1,
         'name': 'L-Cost',
         'legendgroup': 'VWAP_Cost_Group',
