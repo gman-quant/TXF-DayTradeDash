@@ -1,6 +1,6 @@
 # 🇹🇼 TXF-DayTradeDash (V2.0)
 
-台灣指數期貨 (TXF) 的低延遲量化數據管線與實時看盤系統。專注 **Tick 成交數據** 的極速處理與視覺化：以 **RingBuffer + Numba** 實現 $O(1)$ 實時指標運算，透過 Dash 提供毫秒級戰情室。
+台灣指數期貨 (TXF) 的低延遲量化數據管線與實時看盤系統。專注 **Tick 成交數據** 的極速處理與視覺化：以 **RingBuffer + Numba** 實現 $O(1)$ 實時指標運算，透過 Dash 戰情室看盤（UI 每 2 秒刷新）。
 
 ---
 
@@ -43,7 +43,7 @@ graph LR
 ```
 
 **效能解耦要點**
-* **後端全速**：`gale.feed` 不受 UI 影響，極速寫入 `SharedRingBuffer`（行情抵達後 ~8μs 完成計算）。
+* **後端全速**：`gale.feed` 不受 UI 影響，持續極速寫入 `SharedRingBuffer`。
 * **前端抽樣**：UI 固定 **2 秒** 重繪一次（獨立定時器讀最新快照），避免高頻全量重繪的 Render Storm。
 * **SVG 繪圖**：降頻至 ~2000 點後用 `go.Scatter` (SVG) 即無壓力。折線刻意**不用 `Scattergl` (WebGL)**——WebGL 不支援 `rangebreaks`（收合盤間空檔所必需），啟用會使 WebGL 折線整條消失。
 
