@@ -1,239 +1,142 @@
-# 🇹🇼 TXF Gale Quant Engine (V2.0)
+# 🇹🇼 TXF-DayTradeDash (V2.0)
 
-**TXF Gale Quant Engine** 是一個專為台灣指數期貨 (TXF) 設計的超低延遲量化數據管線與實時監控系統。
-
-本版本 (V2.0) 專注於 **Tick 成交數據** 的極速處理與視覺化，採用 **Gale Modular Architecture** 與 **RingBuffer + Numba** 技術，實現了 $O(1)$ 複雜度的實時指標運算，並透過 Dash 提供毫秒級的戰情室監控。
+台灣指數期貨 (TXF) 的低延遲量化數據管線與實時看盤系統。專注 **Tick 成交數據** 的極速處理與視覺化：以 **RingBuffer + Numba** 實現 $O(1)$ 實時指標運算，透過 Dash 提供毫秒級戰情室。
 
 ---
 
-## 🌟 核心功能 (Key Features)
+## 🌟 核心功能
 
-### ⚡️ 極限效能 (Performance)
-* **RingBuffer 架構**：使用預先分配記憶體的 NumPy 陣列 (Shared Memory)，實現零動態分配 (Zero-allocation) 的數據寫入。
-* **Numba JIT 加速**：指標運算邏輯編譯為機器碼，計算速度接近 C/C++。
-* **O(1) Smart Slicing**：後端實現智慧切片視圖 (Vectorized View)，無論回溯 100K 筆還是 1M 筆數據，記憶體傳輸量恆定為 ~2000 筆 (16KB)。
-* **Smart Downsampling**：前端繪圖採用二分搜尋 (Bisect) 與降頻，CPU 佔用率極低。
+**效能**
+* **RingBuffer + Shared Memory**：預先配置的 NumPy 陣列，零動態分配寫入。
+* **Numba JIT**：指標運算編譯為機器碼。
+* **O(1) Smart Slicing**：無論回溯 100K 或 1M 筆，記憶體傳輸恆定 ~2000 筆 (16KB)。
 
-### 📊 專業視覺化 (Professional Visualization)
-* **暗黑戰情室 UI**：針對長時間看盤設計的低對比度深色主題。
-* **多週期 K 線切換**：支援 5s, 1m, 5m, 15m 等多種週期的 K 線即時聚合與切換。
-* **雙向同步縮放**：主圖 (價格) 與副圖 (動能) 的 X 軸縮放與平移完美同步。
-* **即時戰情看板**：即時顯示當盤高低、波幅、開盤漲跌、VWAP 乖離率及基差。
+**視覺化**
+* **暗黑戰情室 UI**、**多週期 K 線** (5s/1m/5m/15m)、**主副圖同步縮放**。
+* **即時戰情看板**：當盤高低、波幅、開盤漲跌、VWAP 乖離、基差。
+* **全日盤連續圖**：夜+日同框，自動收合盤間空檔與週末 (`rangebreaks`)、換盤處分隔線；VWAP 標準差色帶 (Semi-Z) 依盤別獨立計算,不跨盤填色。
 
-### 🔄 雙模運作 (Dual Mode)
-* **Live Mode**：連接 Kafka 進行實時串流監控。
-* **History Mode**：指定日期進行歷史數據全速回放 (Backtest Replay)，用於策略驗證與除錯。
+**雙模運作**
+* **Live**：連 Kafka 實時串流。**History**：指定日期全速回放 (Kafka 或 Parquet)。
 
 ---
 
-## 🏗️ 系統架構 (Architecture)
+## 🏗️ 架構
 
-本系統採用 **Gale Modular Architecture**，職責分明：
+模組化分層，職責分明：
 
-*   **`gale.infra`** (Infrastructure): 底層記憶體管理 (Shared Memory)。
-*   **`gale.feed`** (Feed Layer): 數據攝取與轉換 (Kafka Consumer, Ingest Server)。
-*   **`gale.alpha`** (Alpha Layer): 純粹的數學運算與訊號生成 (Numba Engine, Volume Profile)。
-*   **`gale.strategy`** (Execution Layer): 策略邏輯與執行引擎。
-*   **`gale.dashboard`** (UI Layer): 視覺化戰情室 (Dash Server)。
+| 模組 | 職責 |
+| :--- | :--- |
+| `gale.infra` | 底層記憶體管理 (Shared Memory) |
+| `gale.feed` | 數據攝取與轉換 (Kafka / Parquet Replay) |
+| `gale.alpha` | 數學運算與訊號生成 (Numba, Volume Profile) |
+| `gale.strategy` | 策略邏輯與執行 |
+| `gale.dashboard` | 視覺化戰情室 (Dash) |
 
 ```mermaid
 graph LR
-    Kafka["Kafka / History Loader"] --> Feed["gale.feed"]
-    Feed --> Infra["gale.infra (Shared Memory)"]
-    
-    subgraph Quant Engine
-        Infra --> Strategy["gale.strategy"]
-        Infra --> Alpha["gale.alpha"]
-        Strategy -.-> Alpha
-    end
-    
-    Strategy --> Dashboard["gale.dashboard"]
-    Dashboard --> Browser["Web UI"]
+    Src["Kafka / Parquet"] --> Feed["gale.feed"]
+    Feed --> Infra["gale.infra (SharedMem)"]
+    Infra --> Alpha["gale.alpha"]
+    Infra --> Strategy["gale.strategy"]
+    Strategy --> Dash["gale.dashboard"] --> Browser["Web UI"]
 ```
 
-### 🎯 設計哲學：物理隔離與效能解耦
+**效能解耦要點**
+* **後端全速**：`gale.feed` 不受 UI 影響，極速寫入 `SharedRingBuffer`（行情抵達後 ~8μs 完成計算）。
+* **前端抽樣**：UI 固定 **2 秒** 重繪一次（獨立定時器讀最新快照），避免高頻全量重繪的 Render Storm。
+* **SVG 繪圖**：降頻至 ~2000 點後用 `go.Scatter` (SVG) 即無壓力。折線刻意**不用 `Scattergl` (WebGL)**——WebGL 不支援 `rangebreaks`（收合盤間空檔所必需），啟用會使 WebGL 折線整條消失。
 
-當上游管線（`txf-streaming-server`）的行情處理延遲已壓縮至 **8 微秒 (μs)** 後，系統效能撞上了兩道「物理與視覺」的最終邊界，Gale Engine 的整體架構設計正是為了在這兩道邊界之間取得最優解：
+---
 
-#### 1. WAN 物理極限 (Speed of Light)
-從台灣期交所/券商機房經由廣域網路 (WAN) 抵達本地路由器，物理傳輸時間通常落在 **2ms ~ 5ms**。這道「光速瓶頸」無法打破，因此後端管線的核心設計目標只有一個：**「絕對不對原始行情疊加任何本地軟體延遲」**，確保行情抵達後在 8μs 內完成指標計算並寫入共享記憶體，實現零本地損耗。
-
-#### 2. UI 渲染解耦 (Screen Refresh Rate)
-人類肉眼與主流螢幕的更新率為 60Hz (每幀 16.6ms) 或 144Hz (每幀 6.9ms)。要求前端儀表板跟隨 8μs 的後端速度逐筆重繪，不僅毫無意義，更會引發 CPU 渲染風暴 (Render Storm)。因此本系統實作了**「雙迴圈非同步架構」**：
-
-- **資料全速狂奔：** `gale.feed` 不受 UI 任何影響，以極限速度持續將 Tick 與指標矩陣寫入 `SharedRingBuffer`。
-- **前端定時抽樣 (Decimation)：** `gale.dashboard` 透過獨立定時器，僅在重繪瞬間去記憶體讀取最新快照，與後端速度完全解耦。**UI 更新週期固定為 2 秒 (`interval=2000ms`)**，此為刻意設計的架構決策：頻率過高（如 < 1s）會因 `Scattergl` 連續全量繪製引發 CPU 渲染風暴 (Render Storm)；2 秒恰好契合本系統最小決策 Timeframe（5 秒）的 2.5 倍安全邊際，視覺足夠流暢且不對瀏覽器造成壓力。
-- **WebGL 全量重繪：** 全面採用 `go.Scattergl`（WebGL GPU 渲染），每次 Callback 觸發時重建完整 Figure，由 GPU 負責渲染大量數據點，將 CPU 渲染開銷壓縮至最低。
-
------
-
-
-## 🛠️ 安裝與設定 (Setup)
-
-### 1. 環境需求
-
-  * Python 3.10+
-  * Kafka Server
-
-### 2. 安裝依賴
+## 🛠️ 安裝
 
 ```bash
 uv venv
-
-. .venv/bin/activate # mac
-. .venv/Scripts/activate # win
-
+. .venv/Scripts/activate   # win  (mac: . .venv/bin/activate)
 uv pip install -r requirements.txt
 ```
 
-### 3. 配置設定
+設定檔在 `config/`：`settings.py`（全域）、`indicator_config.py`（指標參數）。
 
-修改 `config/` 下的設定檔：
-*   `settings.py`: 全域參數。
-*   `indicator_config.py`: 指標參數 (如 SMA 週期)。
+---
 
------
+## 🚀 執行
 
-## 🚀 如何執行 (Usage)
-
-V2.0 版本統一使用 `bin.run_supervisor` 作為入口：
-
-### 1. 實時監控模式 (Live Mode)
-
-預設連接 Kafka 並開始接收即時 Tick。
+統一入口 `bin.run_supervisor`。
 
 ```bash
+# Live 實時監控 (預設連 Kafka)
 python -m bin.run_supervisor
+
+# Kafka 歷史回放
+python -m bin.run_supervisor --mode history --date 2026-01-16 --session day
+
+# Parquet 回放：直接給 --date 即自動切 Parquet 來源
+python bin/run_supervisor.py --source parquet --date 2025-12-08 --end-date 2025-12-11 --speed 0
 ```
 
-### 2. Kafka 歷史回放模式 (History Mode)
+`--speed 0` = 極速載入（數十萬筆秒開，靜態分析用）；`1.0` = 依歷史節奏即時模擬；`>1.0` = 倍速。
+指標 (VWAP, High/Low) 會在每日及夜盤開盤自動重置，Shared Memory 依載入天數自動擴容。
 
-指定日期進行歷史數據回放。
+### 批次匯出 HTML (`tools/batch_export_html.py`)
+
+無需開網頁，全速產出含全指標 (COFI/COBI…) 的互動式 HTML 快照。
 
 ```bash
-python -m bin.run_supervisor --mode history --date 2026-01-16 --session day
-python -m bin.run_supervisor --mode history --date 2026-01-17 --session night
+# Kafka 回放，預設日夜各自出檔
+python tools/batch_export_html.py --start-date 2026-04-01 --end-date 2026-05-01
+
+# Parquet：未指定 --session 時預設「全日盤 (full)」，夜+日同框、自動跳過週六日
+python tools/batch_export_html.py --start-date 2025-12-01 --end-date 2026-07-01 --source parquet
+
+# 單抓某盤 (e.g. 週五夜盤其交易日試算在週六，故傳週六)
+python tools/batch_export_html.py --start-date 2025-12-06 --session night --source parquet
 ```
 
-### 3. Parquet 歷史回放與分析模式 (History & Analysis) -> [New!]
- 
- V1.1 新增了基於 Parquet 檔案的高效回放引擎，支援多日連續回放與靜態全歷史分析。
- 
- #### (A) 即時模擬回測 (Realtime Simulation)
- 
- 模擬真實盤中時間流逝，用於觀察策略與指標的動態變化。
- 
- ```bash
- # 播放單日 (預設速度 1.0x)
- python bin/run_supervisor.py --source parquet --date 2025-12-08
- 
- # 播放多日連續行情 (e.g. 12/08 ~ 12/11)
- python bin/run_supervisor.py --source parquet --date 2025-12-08 --end-date 2025-12-11
- ```
- 
- #### (B) 極速全歷史分析 (Instant Load / Static Analysis)
- 
- 忽略時間間隔，以極限速度 (Speed=0) 將指定日期範圍的所有資料一次性載入記憶體。
- 適用於進行這幾天的 K 線全貌分析、Volume Profile 分佈研究，或快速驗證指標邏輯。
- 
- ```bash
- # 加上 --speed 0 啟用極速模式 (數十萬筆資料秒開)
- python bin/run_supervisor.py --source parquet --date 2025-12-08 --end-date 2025-12-11 --speed 0
- ```
- 
- > **💡 Smart CLI Behavior:**
- > *   若直接輸入 `--date`，系統自動判斷為 **Parquet Source**。
- > *   若需跑 Kafka 的歷史模式，請明確指定 `--mode history`。
- 
- > **💡 New Features:**
- > *   **Smart Resolution**: 系統會自動根據日期尋找 TXF (期貨) 與 TSE (加權指數) 的 Parquet 檔案。
- > *   **Dynamic Capacity**: Shared Memory 會根據載入天數自動擴容 (e.g. 4 天 -> 80 萬筆容量)，確保資料不遺失。
- > *   **Session Awareness**: 指標 (VWAP, High/Low) 會在每日及夜盤開盤時自動重置。
-  
-  *(Legacy Kafka History Mode 仍保留，透過 `--mode history` 呼叫)*
- 
- ### 4. 自動批次匯出工具 (Headless Batch Export) -> [New!]
- 
- 為了方便大量生成歷史圖表與戰情室快照，新增了 `tools/batch_export_html.py`。該工具無需開啟網頁介面，即可全速產出包含所有指標 (含 COFI/COBI) 的 HTML 互動式圖表。
- 
- ```bash
- # 透過 Kafka 歷史回放匯出指定日期 (e.g. 04/01 ~ 05/01)
- python tools/batch_export_html.py --start-date 2026-04-01 --end-date 2026-05-01
+* **來源預設**：`kafka` → `both`（日夜各自出檔）；`parquet` → `full`（全日盤）。
+* **full 自動跳週末**：週一 parquet 檔已含上週五夜盤，工作日即完整涵蓋；`night/day/both` 不跳。
+* 假日/缺檔自動略過（印 warning 不中斷）。存至 `snapshots/`，檔名帶盤別後綴：`FD`=全日 / `0N`=夜 / `0D`=日，`_p`=parquet（如 `TXF-Chart-2025-12-01-FD_p.html`）。
 
- # 批次匯出 Parquet 歷史 (e.g. 04/27 ~ 05/01) 的日夜雙盤圖表
- python tools/batch_export_html.py --start-date 2026-04-27 --end-date 2026-05-01 --session day --source parquet 
- ```
- 
- > **💡 工具亮點:**
- > *   **完全自動化**: 自動識別假日並跳過，預設處理日夜雙盤 (`--session both`)。
- > *   **預設使用 Kafka**: 預設採 Kafka 歷史回放模式 (`--source kafka`)。
- > *   **指標完整性**: 確保 100% 同步計算完所有指標後才存檔，戰情看板數值與盤中完全一致。
- > *   **檔案管理**: 匯出的檔案會自動存放在 `snapshots/` 資料夾，檔名如 `TXF-Chart-2026-04-01-0N.html`。
+### 批次匯出五檔 (`tools/batch_export_bidask.py`)
 
- ### 5. 自動批次五檔資料匯出工具 (Batch Export BidAsk) -> [New!]
- 
- 針對五檔 (BidAsk) 歷史資料搜集，新增了 `tools/batch_export_bidask.py`。該工具會透過 Kafka 自動批次將特定時間範圍內的所有五檔資料匯出為 Parquet 格式，支援斷點續傳和自動略過非交易日。
+透過 Kafka 將指定範圍五檔 (BidAsk) 匯出為 Parquet，支援斷點續傳、自動略過非交易日。
 
- ```bash
- # 從 2025-12-01 開始批次抓取到今天的日夜盤五檔資料
- python tools/batch_export_bidask.py
+```bash
+python tools/batch_export_bidask.py --start-date 2025-12-01 --end-date 2026-05-10 --session both
+```
 
- # 指定日期範圍與盤別
- python tools/batch_export_bidask.py --start-date 2025-12-01 --end-date 2026-05-10 --session both
- ```
+直接解析 Protobuf 還原原始五檔陣列，依年月存至 `D:\txf-data\raw_ticks\TXF\`（如 `2026-05-09_TXF_bidask.parquet`）。
 
- > **💡 工具亮點:**
- > *   **自動化建立高精度歷史庫**: 每跑完一天會自動依據年份、月份存放至 `D:\txf-data\raw_ticks\TXF\` 目錄下，如 `2026-05-09_TXF_bidask.parquet`。
- > *   **精確原物料擷取**: 直接解析 Protobuf 還原最原始的五檔陣列，提供最高品質的歷史回測依據。
+---
 
------
+## ⚙️ 參數速查
 
-## ⚙️ 參數說明 (Arguments Reference)
-
-| Argument | Value | Description |
+| 參數 | 值 | 說明 |
 | :--- | :--- | :--- |
-| **`--source`** | `kafka` (**Default**) | **Kafka 來源**。連線至 Broker 進行實時行情監控。 |
-| | `parquet` | **Parquet 來源**。從歷史檔案載入進行回測或分析。若提供 `--date` 但未指定 `--source`，系統會自動切換至 Parquet 模式。 |
-| **`--speed`** | `0` (**Parquet Default**) | **極速載入 (Instant)**。Parquet 模式下全速載入 (Static Analysis)。此參數僅對 Parquet 模式有效。 |
-| | `1.0` | **即時模擬 (Realtime)**。依據歷史時間間隔播放，模擬盤中節奏。 |
-| | `> 1.0` | **倍速播放 (Fast Forward)**。例如 `5.0` 代表 5 倍速快轉。 |
-| `--date` | `YYYY-MM-DD` | 指定回放起始日期 (Parquet Mode 必填)。 |
-| `--end-date` | `YYYY-MM-DD` | 指定回放結束日期 (選填，若無則只回放單日)。 |
-| **`--mode`** | `live` (**Default**) | **實時監控**。正常盤中運作模式 (Kafka Live)。 |
-| | `history` | **歷史回測**。用於 Legacy Kafka 回放 (需明確指定)。 |
-| **`--session`** | `day` (**Default**) | **指定盤別**。用於 Kafka History Mode。 |
-| | `night` | 指定夜盤時段 (前日 15:00 ~ 當日 05:00)。 |
+| `--source` | `kafka` (預設) / `parquet` | 資料來源。給 `--date` 未指定時自動切 Parquet。 |
+| `--speed` | `0` (Parquet 預設) / `1.0` / `>1.0` | 極速載入 / 即時模擬 / 倍速。僅 Parquet 有效。 |
+| `--date` / `--end-date` | `YYYY-MM-DD` | 回放起訖日（Parquet 必填起始）。 |
+| `--mode` | `live` (預設) / `history` | 實時 / Kafka 歷史回放。 |
+| `--session` | `day` / `night` / `full` / `both` | 日盤 / 夜盤 / 全日盤(夜+日同框) / 日夜各自出檔(僅 batch_export)。 |
 
------
+---
 
-## 📂 專案結構 (Project Structure)
+## 📂 專案結構
 
 ```text
-txf-gale-engine/
-├── bin/                # 🚀 執行入口 (Launchers)
-│   ├── run_supervisor.py      # 主程式入口 (統一啟動 Ingest/Strategy/Dash)
-│   └── run_dashboard.py       # Dashboard 獨立進程 (由 Supervisor 呼叫)
-├── gale/               # 📦 核心套件
-│   ├── infra/          # 基礎設施 (Memory)
-│   ├── feed/           # 數據源 (Kafka)
-│   ├── alpha/          # 訊號核心 (Numba)
-│   ├── strategy/       # 策略執行
-│   └── dashboard/      # 視覺化介面
-├── config/             # ⚙️ 系統配置
-├── tools/              # 🔧 實用工具
-│   ├── batch_export_html.py   # 自動批次 HTML 匯出工具
-│   └── batch_export_bidask.py # 自動批次五檔資料匯出工具
-├── scratch/            # 🧪 開發分析腳本 (非正式)
-├── snapshots/          # 📸 匯出的 HTML 圖表快照
-├── data_schemas/       # 📝 Protobuf 定義
-├── Notes/              # 📚 開發筆記
+txf-daytradedash/
+├── bin/                # 執行入口 (run_supervisor / run_dashboard)
+├── gale/               # 核心套件 (infra / feed / alpha / strategy / dashboard)
+├── config/             # 系統配置
+├── tools/              # batch_export_html.py / batch_export_bidask.py
+├── snapshots/          # 匯出的 HTML 圖表快照
+├── data_schemas/       # Protobuf 定義
 └── README.md
 ```
 
------
+---
 
 ## ⚠️ Disclaimer
 
-本系統僅供量化研究與技術分析使用，不構成任何投資建議。高頻交易涉及高風險，請謹慎使用。
-
------
+僅供量化研究與技術分析，不構成投資建議。高頻交易高風險，請謹慎使用。
