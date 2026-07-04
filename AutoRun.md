@@ -1,4 +1,9 @@
-# macOS 自動執行 TXF Gale Dashboard Supervisor SOP
+# ⚠️ 歷史文件(已退役)— macOS 自動執行 TXF Gale Dashboard Supervisor SOP
+
+> **本文件描述的是舊 macOS 環境的 launchd 常駐設定,已不再使用。**
+> 現行 Windows 環境:live 監控用手動 `TXF_Live_Monitor.bat`;每日批次匯出由 workspace 層的
+> "TXF Daily Sync" 排程(13:50)呼叫本 repo 的 `tools/batch_export_*.py`。
+> 本文件仍有的現役價值:解釋了 supervisor 為何**刻意無視 SIGTERM**(launchd 管家時代的設計)。
 
 **服務識別碼**：`com.garrett.txf.gale_dashboard_supervisor`
 **開發環境**：macOS Monterey (12.7.6) 適用 (亦相容於 Ventura / Sonoma / Sequoia)

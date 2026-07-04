@@ -90,13 +90,14 @@ python tools/batch_export_html.py --start-date 2026-04-01 --end-date 2026-05-01
 # Parquet：未指定 --session 時預設「全日盤 (full)」，夜+日同框、自動跳過週六日
 python tools/batch_export_html.py --start-date 2025-12-01 --end-date 2026-07-01 --source parquet
 
-# 單抓某盤 (e.g. 週五夜盤其交易日試算在週六，故傳週六)
-python tools/batch_export_html.py --start-date 2025-12-06 --session night --source parquet
+# 單抓某盤:parquet 來源以「檔案日期」定址，週五夜盤存在下一交易日(週一)的檔裡 → 傳週一
+# (輸出會依最後 tick 自動改名為週六日期，如 2025-12-06-0N_p；「傳週六」的定址慣例僅適用 --source kafka)
+python tools/batch_export_html.py --start-date 2025-12-08 --session night --source parquet
 ```
 
 * **來源預設**：`kafka` → `both`（日夜各自出檔）；`parquet` → `full`（全日盤）。
 * **full 自動跳週末**：週一 parquet 檔已含上週五夜盤，工作日即完整涵蓋；`night/day/both` 不跳。
-* 假日/缺檔自動略過（印 warning 不中斷）。輸出至 `config.SNAPSHOT_ROOT`（預設 `D:\txf-snapshot`，可用 `--out-dir` 覆寫），依 **年/月** 分層。檔名帶盤別後綴：`FD`=全日 / `0N`=夜 / `0D`=日，`_p`=parquet（如 `2025\12\TXF-Chart-2025-12-01-FD_p.html`）。快照為可重生的衍生快取,不進 repo。
+* 假日/缺檔自動略過（印 warning 不中斷）。輸出至 `config.SNAPSHOT_ROOT`（預設 `D:\txf-snapshot`，可用 `--out-dir` 覆寫），依 **年/月** 分層。檔名帶盤別後綴：`FD`=全日 / `0N`=夜 / `1D`=日，`_p`=parquet（如 `2025\12\TXF-Chart-2025-12-01-FD_p.html`）。快照為可重生的衍生快取,不進 repo。
 
 ### 批次匯出五檔 (`tools/batch_export_bidask.py`)
 
@@ -118,19 +119,21 @@ python tools/batch_export_bidask.py --start-date 2025-12-01 --end-date 2026-05-1
 | `--speed` | `0` (Parquet 預設) / `1.0` / `>1.0` | 極速載入 / 即時模擬 / 倍速。僅 Parquet 有效。 |
 | `--date` / `--end-date` | `YYYY-MM-DD` | 回放起訖日（Parquet 必填起始）。 |
 | `--mode` | `live` (預設) / `history` | 實時 / Kafka 歷史回放。 |
-| `--session` | `day` / `night` / `full` / `both` | 日盤 / 夜盤 / 全日盤(夜+日同框) / 日夜各自出檔(僅 batch_export)。 |
+| `--session` | 依工具而異 | `run_supervisor` 只收 `day`/`night`;`gale.feed.ingest`/`replay` 收 `day`/`night`/`full`;`batch_export_html` 收 `day`/`night`/`both`/`full`(both=日夜各自出檔、full=夜+日同框)。 |
 
 ---
 
 ## 📂 專案結構
 
 ```text
-txf-daytradedash/
+txf-gale-engine/  (repo 名: TXF-DayTradeDash)
 ├── bin/                # 執行入口 (run_supervisor / run_dashboard)
 ├── gale/               # 核心套件 (infra / feed / alpha / strategy / dashboard)
 ├── config/             # 系統配置
 ├── tools/              # batch_export_html.py / batch_export_bidask.py
 ├── data_schemas/       # Protobuf 定義
+├── Notes/              # 交易 playbook (order-flow 指標讀法)
+├── TXF_Live_Monitor.bat / TXF_History_Replay.bat   # Windows 啟動器 (cwd 必須是專案根)
 └── README.md
 ```
 
