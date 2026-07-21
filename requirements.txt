@@ -1,9 +1,22 @@
-confluent-kafka
-dash
-duckdb
-grpcio-tools
-numba
-pandas
-polars[rtcompat]
-pyarrow
+# 直接依賴 + 已測過的版本下限(2026-07-21 全面升級並驗證,Python 3.13.11)。
+# 精確重現用 requirements.lock:uv pip sync --python .venv/Scripts/python.exe requirements.lock
+#
+# ⚠️⚠️ polars 一定要帶 [rtcompat] extra ⚠️⚠️
+#   本機 CPU = Intel Xeon E3-1230 V2(Ivy Bridge, 2012),**有 AVX 但沒有 AVX2**。
+#   polars 預設 runtime 需 AVX2;若用 `uv pip install --upgrade polars`(不帶 extra),
+#   會升 polars/runtime-32 卻留下舊的 runtime-compat → 版本錯配 → Illegal instruction 崩潰。
+#   升級一律用:uv pip install --upgrade -r requirements.txt
+#
+# ⚠️ numpy 上限來自 **numba**(numba 0.66.0 要求 numpy<2.5),不是 Python 版本。
+#   gale/alpha/ 有實際使用 @njit/@jit,numba 不可移除 → 全 workspace 統一釘 numpy 2.4.6。
+confluent-kafka>=2.15.0
+dash>=4.4.0
+duckdb>=1.5.4
+grpcio-tools>=1.82.1
+numba>=0.66.0
+numpy==2.4.6
+pandas>=3.0.3
+plotly>=6.9.0
+polars[rtcompat]>=1.43.0
+pyarrow>=25.0.0
 uvloop; sys_platform != 'win32'
