@@ -17,46 +17,85 @@ body {
 }
 
 /* =========================================================================
-   React-Select Dark Mode Overrides (From old style.css)
+   Dash 4 控制項暗色化(2026-07-21 重寫)
+
+   ⚠️ 為什麼整份重寫:Dash 3 的 dcc.Dropdown 用 react-select v1,class 是
+      `.Select-control` / `.Select-menu-outer` / `.Select-option` …
+      **Dash 4 改用 Radix UI 自建元件**(DOM 上看得到 aria-controls="radix-…"),
+      class 全換成 `dash-*` 前綴 → 舊選擇器 100% 失配。
+      症狀不是「沒樣式」而是**白底白字**:Dash 4 預設淺色底 + 本檔 body 的
+      `color:#FFFFFF` 被繼承 → 文字存在但看不見(2026-07-21 升 dash 3.3→4.4 實際踩到)。
+   ⚠️ 這些 class 是 Dash 的實作細節,不是公開 API —— 下次升 Dash 大版本要重驗這一段。
+      驗法:跑 `-m bin.run_supervisor --source parquet --date <有資料的日子> --speed 0`,
+      開 8051 用 devtools 看 `button.dash-dropdown` 的 computed background/color。
    ========================================================================= */
 
-/* 下拉選單的主體框 (未展開時) */
-.Select-control {
+/* --- Dropdown:未展開時的按鈕本體 --- */
+button.dash-dropdown {
     background-color: #222222 !important;
     border: 1px solid #444444 !important;
-}
-
-/* 選中的文字顏色 */
-.Select-value-label {
     color: #FFFFFF !important;
 }
 
-/* 預設佔位符文字顏色 */
-.Select-placeholder {
-    color: #888888 !important;
+button.dash-dropdown:hover {
+    border-color: #666666 !important;
 }
 
-/* 展開後的選單外框 */
-.Select-menu-outer {
+.dash-dropdown-value,
+.dash-dropdown-value-item {
+    color: #FFFFFF !important;
+}
+
+/* --- Dropdown:展開後的浮層(Radix portal,掛在 body 底下)--- */
+.dash-dropdown-content {
     background-color: #222222 !important;
     border: 1px solid #444444 !important;
 }
 
-/* 選項文字顏色 */
-.Select-option {
-    color: #AAAAAA !important;
+.dash-options-list,
+.dash-dropdown-options {
     background-color: #222222 !important;
 }
 
-/* 滑鼠移過選項時的顏色 (Hover) */
-.Select-option.is-focused {
+.dash-options-list-option,
+.dash-dropdown-option {
+    color: #DDDDDD !important;
+    background-color: transparent !important;
+}
+
+.dash-options-list-option:hover,
+.dash-dropdown-option:hover,
+.dash-options-list-option[data-highlighted],
+.dash-dropdown-option[aria-selected="true"] {
     background-color: #444444 !important;
     color: #FFFFFF !important;
 }
 
-/* 移除輸入游標的白色背景 */
-.Select-input>input {
-    color: white !important;
+.dash-options-list-option-text {
+    color: inherit !important;
+}
+
+/* --- 數字輸入框(Slider 兩端的 min/max input)--- */
+input.dash-input-container,
+.dash-range-slider-input {
+    background-color: #222222 !important;
+    border: 1px solid #444444 !important;
+    color: #FFFFFF !important;
+}
+
+/* --- Slider --- */
+.dash-slider-track {
+    background-color: #444444 !important;
+}
+
+.dash-slider-mark {
+    color: #888888 !important;
+}
+
+.dash-slider-tooltip {
+    background-color: #222222 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #444444 !important;
 }
 
 /* =========================================================================
