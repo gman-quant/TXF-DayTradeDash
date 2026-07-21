@@ -13,7 +13,7 @@ from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.chart import create_blank_figure
 from gale.dashboard.data_model import get_last_value
 from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
-from config.ui_theme import UI_COLOR
+from config.ui_theme import UI_COLOR, DRAWING_STYLE
 
 # --- Configuration ---
 try:
@@ -47,78 +47,13 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
     # [Fix] Store moved to layout.py
 
     # =========================================================================
-    # ⚡ Clientside Callback: Drawing Config & Shape Editing
+    # 2026-07-21:原本這裡有一個 clientside callback,用途只有兩個 ——
+    #   (a) 把「畫筆粗細/顏色」dropdown 的值套到新圖形與當前選取圖形
+    #   (b) 追蹤當前選取的 shape index(active-shape-store),而它只被 (a) 消費
+    # 兩個 dropdown 已移除(用戶確認不在本看板畫線)→ 整段連同 active-shape-store
+    # 一併移除。畫線功能不受影響:Plotly modebar 的繪圖工具照用,
+    # 新圖形樣式改讀 config/ui_theme.py 的 DRAWING_STYLE。
     # =========================================================================
-    app.clientside_callback(
-        """
-        function(width, color, relayoutData, currentActiveIndex) {
-            const graph = document.getElementById('main-chart');
-            if (!graph) return window.dash_clientside.no_update;
-            
-            const ctx = dash_clientside.callback_context;
-            const triggered = ctx.triggered.map(t => t.prop_id);
-            
-            // 1. Determine if this call was triggered by a Shape Interaction (Drag/Resize)
-            //    If so, we just want to update our 'active shape index' and do NOTHING else.
-            if (triggered.some(t => t.includes('main-chart.relayoutData'))) {
-                if (!relayoutData) return window.dash_clientside.no_update;
-                
-                // Parse keys like "shapes[2].x0" to extract index "2"
-                let newIndex = null;
-                for (const key in relayoutData) {
-                    if (key.startsWith('shapes[')) {
-                        const match = key.match(/shapes\[(\d+)\]/);
-                        if (match) {
-                            newIndex = parseInt(match[1]);
-                            break; 
-                        }
-                    }
-                }
-                
-                // If we found a shape index, update the store. 
-                // Don't relayout graph (avoid infinite loop).
-                if (newIndex !== null) {
-                    return newIndex; 
-                }
-                return window.dash_clientside.no_update;
-            }
-            
-            // 2. If triggered by Dropdowns (Width/Color), apply style to:
-            //    A. Defaults for NEW shapes (newshape)
-            //    B. The currently ACTIVE shape (if one exists)
-            
-            let update = {
-                'newshape.line.width': width,
-                'newshape.line.color': color
-            };
-            
-            // If we have a valid active shape index, try to update it too
-            // Note: We need to be careful. If the shape was deleted, this might error, but Plotly handles it gracefully usually.
-            if (currentActiveIndex !== null && currentActiveIndex !== undefined) {
-                // Construct dynamic keys for the specific shape
-                update[`shapes[${currentActiveIndex}].line.width`] = width;
-                update[`shapes[${currentActiveIndex}].line.color`] = color;
-            }
-            
-            try {
-                if (window.Plotly) {
-                    Plotly.relayout(graph, update);
-                }
-            } catch (e) {
-                console.error("Relayout Error:", e);
-            }
-            
-            return window.dash_clientside.no_update;
-        }
-        """,
-        Output("active-shape-store", "data"),
-        [
-            Input("drawing-width-dropdown", "value"),
-            Input("drawing-color-dropdown", "value"),
-            Input("main-chart", "relayoutData"),
-        ],
-        [State("active-shape-store", "data")],
-    )
 
     # =========================================================================
     # 🎮 Callback 1: Viewport & Zoom Management (視野控制)
@@ -171,8 +106,6 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
             Input("timeframe-dropdown", "value"),
             Input("chart-zoom-state", "data"),
             Input("session-static-store", "data"),
-            Input("drawing-width-dropdown", "value"),
-            Input("drawing-color-dropdown", "value"),
         ],
         [State("last-update-timestamp", "data")],
     )
@@ -182,8 +115,6 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
         timeframe,
         saved_zoom_range,
         session_static,
-        line_width,
-        line_color,
         last_ts_stored,
     ):
         """
@@ -246,8 +177,10 @@ def start_dashboard_server(indicator_manager, port=8050, args=None):
                 xaxis=dict(
                     range=final_range  # 強制套用我們計算出的範圍
                 ),
-                # [Drawing Config] Apply user settings for new shapes
-                newshape=dict(line=dict(color=line_color, width=line_width)),
+                # [Drawing Config] 新圖形的預設樣式(2026-07-21 起走 config,
+                # 原本由已移除的「畫筆粗細/顏色」dropdown 即時提供)
+                newshape=dict(line=dict(color=DRAWING_STYLE['color'],
+                                        width=DRAWING_STYLE['width'])),
             )
 
             # --- 4. Scoreboard Calculation (戰情板計算) ---

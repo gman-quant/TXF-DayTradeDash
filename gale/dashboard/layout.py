@@ -94,42 +94,10 @@ def create_main_layout(max_capacity=SHM_CAPACITY, update_interval_ms=1000):
                         )
                     ]),
                     
-                    # [新增] 畫筆粗細設定
-                    html.Div(style={'width': '80px', 'marginLeft': '20px', 'marginRight': '0px'}, children=[
-                        # html.Label("✏️ Width", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
-                        dcc.Dropdown(
-                            id='drawing-width-dropdown',
-                            options=[
-                                {'label': '1px', 'value': 1},
-                                {'label': '2px', 'value': 2},
-                                {'label': '3px', 'value': 3},
-                                {'label': '5px', 'value': 5},
-                                {'label': '8px', 'value': 8},
-                            ],
-                            value=1, # Default
-                            clearable=False,
-                            style={'fontSize': '12px'}
-                        )
-                    ]),
-                    
-                    # [新增] 畫筆顏色設定
-                    html.Div(style={'width': '80px', 'marginLeft': '10px'}, children=[
-                        # html.Label("🎨 Color", style={'color': UI_COLOR['TEXT_SUB'], 'fontSize': '12px', 'marginBottom': '5px', 'display': 'block'}),
-                        dcc.Dropdown(
-                            id='drawing-color-dropdown',
-                            options=[
-                                {'label': '🟡', 'value': '#FFE100'}, # Yellow
-                                {'label': '⚪', 'value': '#FFFFFF'}, # White
-                                {'label': '🔴', 'value': '#FF4136'}, # Red
-                                {'label': '🟢', 'value': '#2ECC40'}, # Green
-                                {'label': '🔵', 'value': '#0074D9'}, # Blue
-                            ],
-                            value='#2ECC40', # Default Green
-                            clearable=False,
-                            style={'fontSize': '12px'}
-                        )
-                    ]),
-                    
+                    # 2026-07-21:「畫筆粗細 / 畫筆顏色」兩個 dropdown 已移除
+                    # (用戶確認不在本看板畫線)。畫線功能本身仍在 —— Plotly modebar
+                    # 的繪圖工具照用,樣式改讀 config/ui_theme.py 的 DRAWING_STYLE。
+
                     # [最右側] 截圖按鈕 (Snapshot)
                     html.Div(style={'marginLeft': '20px'}, children=[
                         html.Button("📸 Save HTML", id='btn-snapshot', n_clicks=0, style={
@@ -181,10 +149,5 @@ def create_main_layout(max_capacity=SHM_CAPACITY, update_interval_ms=1000):
             # [New] Session Static Data Store (Prior Close, Open)
             dcc.Store(id='session-static-store', data={}),
             
-            # [New] Dummy store for clientside callback
-            dcc.Store(id='drawing-config-store', data={}),
-
-            # [Fix] Added missing store for active shape index
-            dcc.Store(id='active-shape-store', data=None),
         ]
     )

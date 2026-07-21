@@ -129,3 +129,15 @@ UI_COLOR = {
     'VP_BUY': 'rgba(255, 82, 82, 0.25)',    # Red (Original RGB)
     'VP_SELL': 'rgba(0, 230, 118, 0.1)',  # Green (Original RGB)
 }
+
+# =============================================================================
+# 畫線工具的預設樣式(2026-07-21)
+# 原本由控制列的「畫筆粗細 / 畫筆顏色」兩個 dropdown 即時調整,用戶確認不在
+# 本看板畫線後移除該 UI(見 git log fix/remove drawing dropdowns)。
+# 畫線功能本身保留(Plotly modebar 的繪圖工具仍可用),只是樣式改為此固定值。
+# 要改回可調:恢復兩個 dcc.Dropdown + update_dashboard 的對應 Input 即可。
+# =============================================================================
+DRAWING_STYLE = {
+    'color': '#2ECC40',   # 綠(原 dropdown 的預設值)
+    'width': 1,           # px(原 dropdown 的預設值)
+}
