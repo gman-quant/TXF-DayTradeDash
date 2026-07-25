@@ -112,27 +112,13 @@ python tools/batch_export_bidask.py --start-date 2025-12-01 --end-date 2026-05-1
 
 ---
 
-## 4. 架構
+## 4. 架構(一分鐘版)
 
-| 模組 | 職責 |
-| :--- | :--- |
-| `gale.infra` | Shared Memory ring buffer |
-| `gale.feed` | 攝取與轉換(Kafka / Parquet replay) |
-| `gale.alpha` | 指標運算(Numba JIT、Volume Profile) |
-| `gale.strategy` | 策略邏輯 |
-| `gale.dashboard` | Dash 戰情室 |
+`gale.feed`(攝取 Kafka/Parquet)→ `gale.infra`(Shared Memory ring buffer)→
+`gale.alpha`(Numba 指標)/ `gale.strategy` → `gale.dashboard`(Dash 網頁)。
 
-```mermaid
-graph LR
-    Src["Kafka / Parquet"] --> Feed["gale.feed"]
-    Feed --> Infra["gale.infra (SharedMem)"]
-    Infra --> Alpha["gale.alpha"]
-    Infra --> Strategy["gale.strategy"]
-    Strategy --> Dash["gale.dashboard"] --> Browser["Web UI"]
-```
-
-**效能解耦**:後端 `gale.feed` 全速寫入 ring buffer、不受 UI 影響;前端固定 2 秒讀一次快照重繪,
-避免 render storm。降頻到 ~2000 點後用 SVG `go.Scatter` 即無壓力。
+**效能解耦**:後端全速寫 ring buffer、不受 UI 影響;前端固定每 2 秒讀一次快照重繪,
+避免 render storm。降頻到約 2000 點後用 SVG 繪圖即無壓力。
 
 > ⚠️ **刻意不用 `Scattergl`(WebGL)** —— WebGL 不支援 `rangebreaks`(收合盤間空檔所必需),
 > 改用會讓折線整條消失。別「優化」成 WebGL。
