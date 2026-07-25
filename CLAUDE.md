@@ -4,7 +4,7 @@
 
 ## 環境與執行
 
-- 一律 `.\.venv\Scripts\python.exe`(Python 3.12)+ `PYTHONUTF8=1`(bin/*.py 沒自我 reconfigure)。cwd 必須是 repo 根(.bat 會硬檢查)。
+- 一律 `.\.venv\Scripts\python.exe`(Python 3.13;2026-07 工作站統一到 3.13)+ `PYTHONUTF8=1`(bin/*.py 沒自我 reconfigure)。cwd 必須是 repo 根(.bat 會硬檢查)。
 - 離線驗證用 parquet 回放(安全):`.venv/Scripts/python.exe -m bin.run_supervisor --source parquet --date 2025-12-08 --speed 0`(dashboard 在 **8051**;live 模式在 **8050**)。
 - Live 模式(`-m bin.run_supervisor` 不帶 --source)連 Kafka 192.168.1.50 —— **agent 別隨便啟動**(吃 live feed、開伺服器)。
 - **沒有測試套件**(tests/ 刻意刪除);驗證 = py_compile + 已知日期的 --speed 0 回放。
