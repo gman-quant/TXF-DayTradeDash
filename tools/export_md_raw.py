@@ -76,6 +76,23 @@ EXPECTED = {
     },
 }
 
+# 「已知的額外欄位」= producer 用 getattr 補收、`to_dict()` 沒宣告的那些
+# (streaming-server `_extra_field_names`,2026-07-28 上線)。
+# ⚠ **刻意不放進 EXPECTED**:EXPECTED 少了任一欄會 `sys.exit(1)`(fatal),而這些欄位
+#   **2026-07-29 08:28 之前的資料沒有**(補收隨那次 producer 重啟才生效)→ 放進去會讓
+#   重跑舊日期的 catchup 直接紅。放這裡則是:出現時安靜接受,不出現也無所謂。
+# 目的 = 讓「⚠ 新欄位」警告回到哨兵本職 —— 真正沒見過的欄位才叫,不被這 12 個常駐佔線。
+# 註:`first_derived_{bid,ask}_volume` 是既有 `_vol` 欄的**別名**(2026-07-29 五萬列比對
+#     零筆不同),消費端認 `_vol` 版為主;留著只因剔除需與 producer 同步部署,風險大於效益。
+KNOWN_EXTRA = {
+    "quote": {
+        "amount_sum", "diff_price", "diff_rate", "diff_type",
+        "first_derived_ask_volume", "first_derived_bid_volume",
+        "target_kind_price", "trade_ask_cnt", "trade_ask_vol_sum",
+        "trade_bid_cnt", "trade_bid_vol_sum", "vol_sum",
+    },
+}
+
 # 型別轉換規則
 F_SCALAR = {"underlying_price", "open", "close", "high", "low", "avg_price",
             "amount", "total_amount", "price_chg", "pct_chg"}
@@ -287,7 +304,7 @@ def main():
             keys.update(k for k in d if k not in OWN)
         seen = {k for k in keys if k not in ("datetime", "date", "time")}
         missing = EXPECTED[typ] - seen - {"datetime", "date", "time"}
-        unknown = seen - EXPECTED[typ]
+        unknown = seen - EXPECTED[typ] - KNOWN_EXTRA.get(typ, set())
 
         df = build_frame(recs, typ)
         info = {
