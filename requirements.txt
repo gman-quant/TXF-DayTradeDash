@@ -9,6 +9,11 @@
 #
 # ⚠️ numpy 上限來自 **numba**(numba 0.66.0 要求 numpy<2.5),不是 Python 版本。
 #   gale/alpha/ 有實際使用 @njit/@jit,numba 不可移除 → 全 workspace 統一釘 numpy 2.4.6。
+# ⚠️ polars 下限 1.43.1 不可退回 1.43.0:1.43.1 修了
+#   **「UB on first/last_non_null with empty chunk」**(polars #28495)。
+#   webviewer 於 2026-07-22~07-30 segfault 8 次,8 個 crash dump 全部指向
+#   `_polars_runtime_compat/_polars_runtime.pyd` 的**同一條指令**(null+0x18 解參考);
+#   本 repo 同樣大量使用 first()/last(),故一併釘住。詳見 memory `txf-webviewer-polars-segfault`。
 confluent-kafka>=2.15.0
 dash>=4.4.0
 duckdb>=1.5.4
@@ -17,6 +22,6 @@ numba>=0.66.0
 numpy==2.4.6
 pandas>=3.0.3
 plotly>=6.9.0
-polars[rtcompat]>=1.43.0
+polars[rtcompat]>=1.43.1
 pyarrow>=25.0.0
 uvloop; sys_platform != 'win32'
