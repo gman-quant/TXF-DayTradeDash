@@ -32,6 +32,8 @@ from pathlib import Path
 
 import polars as pl
 
+from config.spread import spread_exprs
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.settings import DATA_ROOT
 
@@ -71,9 +73,17 @@ def build_day(d: _date):
     else:
         ev = ev.with_columns(pl.lit(None, dtype=pl.Float64).alias("spot"))
 
+    # ⚠ 減法本身走 **vendored 正典** `config/spread.py`(2026-08-11)。
+    #   正典在 `txf-quant-platform/core/spread.py`,這裡是**逐位元複製**,
+    #   由 platform 的 `tools/check_time_constants.py` 每天比 SHA256
+    #   (掛在 daily_sync 第一步 time_const)。🔒 **改它要兩份一起改。**
+    #   為什麼要這樣:這條規則先前在兩個 repo 各寫一次,而**分歧的那天
+    #   沒有任何人會被通知**。2026-08-11 退役前先證明過:六年 1600 天 / 242 萬列,
+    #   兩份算出來零不符 ⇒ 換的只是「誰算的」,不動任何一個真實值。
+    #   ⚠ 雜湊只擋分歧,擋不了「兩份一起錯」—— 那是 platform 真值 oracle 的事。
+    _E = spread_exprs("r1_px", "r2_px", "spot")
     return ev.with_columns([
-        (pl.col("r2_px") - pl.col("r1_px")).round(2).alias("calendar_spread"),
-        (pl.col("r2_px") - pl.col("spot")).round(2).alias("r2_basis"),
+        _E["calendar_spread"], _E["r2_basis"],
         # 近月報價的陳舊度:夜盤可能拉長,是這一列可不可信的判準
         (pl.col("ts") - pl.col("_r1_ts")).dt.total_milliseconds().alias("r1_lag_ms"),
     ]).drop("_r1_ts").drop_nulls("calendar_spread")
