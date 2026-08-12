@@ -36,6 +36,14 @@ set /p "speed_input=Speed (1=Realtime, 10=10x, 0=Max [Enter]): "
 
 echo.
 echo --------------------------------------------------------
+REM 2026-08-12: broker default is now localhost (correct default for a public repo).
+
+REM Set GALE_KAFKA_BROKER in your environment to point at a remote broker.
+
+if not defined GALE_KAFKA_BROKER set "GALE_KAFKA_BROKER=localhost:9092"
+
+
+
 echo Running: python -m bin.run_supervisor --mode history --date %target_date% --session %session_input% --source %source_input% --speed %speed_input%
 echo --------------------------------------------------------
 echo.

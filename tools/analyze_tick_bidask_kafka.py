@@ -26,7 +26,7 @@ from config.txf_calendar import get_history_range
 class TickBidAskAnalyzer:
     """分析 Tick 和 BidAsk 數據的對應關係"""
     
-    def __init__(self, broker_url: str = '192.168.1.50:9092'):
+    def __init__(self, broker_url: str = 'localhost:9092'):
         self.broker_url = broker_url
         self.tick_data = []  # (timestamp_ms, tick_object)
         self.bidask_data = []  # (timestamp_ms, bidask_object)
@@ -321,7 +321,7 @@ async def main():
     # 解析參數
     date = sys.argv[1] if len(sys.argv) > 1 else "2025-12-22"
     session = sys.argv[2] if len(sys.argv) > 2 else "day"
-    broker = sys.argv[3] if len(sys.argv) > 3 else "192.168.1.50:9092"
+    broker = sys.argv[3] if len(sys.argv) > 3 else "localhost:9092"
     
     # 創建分析器
     analyzer = TickBidAskAnalyzer(broker_url=broker)

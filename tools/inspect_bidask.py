@@ -16,7 +16,7 @@ from data_schemas.txf_data_pb2 import BidAsk # 引入 Quote 的 Protobuf
 # --- 設定 ---
 DATE = '2025-12-01'      # 您想檢查的日期
 SESSION = 'day'          # 日盤 (資料量通常最大)
-BROKER = '192.168.1.50:9092'
+BROKER = 'localhost:9092'
 TOPIC = 'txf-bidask'     # 您的報價 Topic
 GROUP = 'inspector_v1'   # 使用獨立的 Group ID 避免干擾主程式
 

@@ -17,6 +17,7 @@ from gale.dashboard.controller import process_market_data, build_combined_figure
 from gale.dashboard.data_model import get_last_value
 from gale.dashboard.ui_utils import create_html_scoreboard_string
 from config.settings import DATA_ROOT, PREV_CLOSE_PRICE, SHM_CAPACITY, SNAPSHOT_ROOT
+from config.settings import KAFKA_BROKER
 
 # 修正 Windows 下 cp950 無法印出 emoji 的問題
 if sys.stdout.encoding != 'utf-8':
@@ -276,7 +277,7 @@ def main():
     parser.add_argument("--source", choices=["parquet", "kafka"], default="kafka", help="Data source")
     parser.add_argument("--out-dir", default=None,
                         help=f"HTML 快照輸出根目錄,依年/月分層。未指定時用 config.SNAPSHOT_ROOT ({SNAPSHOT_ROOT})")
-    parser.add_argument("--broker", default="192.168.1.50:9092", help="Kafka broker")
+    parser.add_argument("--broker", default=KAFKA_BROKER, help="Kafka broker")
     parser.add_argument("--group", default="gale_batch_html", help="Kafka group")
     parser.add_argument("--topic", default="txf-tick", help="Base topic name")
     

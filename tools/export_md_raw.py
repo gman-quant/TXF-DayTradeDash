@@ -16,7 +16,7 @@ txf-md-raw(Kafka,JSON)→ parquet 檔案庫
 
 用法:
     python -m tools.export_md_raw --date 2026-07-27
-    python -m tools.export_md_raw --date 2026-07-27 --broker 192.168.1.50:9092
+    python -m tools.export_md_raw --date 2026-07-27 --broker <ip>:9092
 
 ⚠ 三個踩過的坑,已在碼內處理:
   1. **時區**:舊的 `_TXF_bidask.parquet` 存 UTC、tick/kbar 存本地 → join 差 8 小時
@@ -39,6 +39,7 @@ from confluent_kafka import Consumer, TopicPartition
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.settings import DATA_ROOT
+from config.settings import KAFKA_BROKER
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")      # cp950 會炸中文
@@ -245,7 +246,7 @@ def build_frame(recs, typ):
 def main():
     ap = argparse.ArgumentParser(description="txf-md-raw → parquet")
     ap.add_argument("--date", required=True, help="交易日 YYYY-MM-DD(不是日曆日)")
-    ap.add_argument("--broker", default="192.168.1.50:9092")
+    ap.add_argument("--broker", default=KAFKA_BROKER)
     ap.add_argument("--dry-run", action="store_true", help="只檢查不寫檔")
     args = ap.parse_args()
 

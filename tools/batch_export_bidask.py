@@ -1,4 +1,5 @@
 import argparse
+from config.settings import KAFKA_BROKER
 import sys
 import os
 import subprocess
@@ -25,7 +26,7 @@ def main():
     parser.add_argument("--start-date", default="2025-12-01", help="Start Date (YYYY-MM-DD)")
     parser.add_argument("--end-date", help="End Date (YYYY-MM-DD), default is today")
     parser.add_argument("--session", choices=["day", "night", "both"], default="both", help="Session to export")
-    parser.add_argument("--broker", default="192.168.1.50:9092", help="Kafka broker")
+    parser.add_argument("--broker", default=KAFKA_BROKER, help="Kafka broker")
     
     args = parser.parse_args()
     

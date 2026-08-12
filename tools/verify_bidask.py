@@ -18,7 +18,7 @@ from config.settings import DATA_ROOT
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger("VerifyBidAsk")
 
-async def verify_bidask(date_str, session, limit=100, broker="192.168.1.50:9092", topic="txf-bidask"):
+async def verify_bidask(date_str, session, limit=100, broker="localhost:9092", topic="txf-bidask"):
     """
     驗證匯出的 Parquet 檔案與 Kafka 原始資料是否 100% 一致。
     """

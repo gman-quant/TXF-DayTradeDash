@@ -13,6 +13,7 @@ from gale.utils.log_utils import setup_logger
 from config.txf_calendar import DAY_SESSION_START, NIGHT_SESSION_START
 from gale.infra.db import load_prev_close
 from config.settings import DATA_ROOT, SHM_CAPACITY
+from config.settings import KAFKA_BROKER
 
 # Logging
 logger = setup_logger("Supervisor")
@@ -407,7 +408,7 @@ def parse_cli_args():
     parser.add_argument("--topic", type=str, help="Shared Memory Topic")
 
     # [Kafka Args]
-    parser.add_argument("--broker", type=str, default="192.168.1.50:9092")
+    parser.add_argument("--broker", type=str, default=KAFKA_BROKER)
     parser.add_argument("--group", type=str, default="gale_v1_unified")
     parser.add_argument("--mode", type=str, default="live", choices=["live", "history"])
     parser.add_argument("--date", type=str, help="YYYY-MM-DD for history mode")

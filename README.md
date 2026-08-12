@@ -1,5 +1,8 @@
 # txf-gale-engine(repo: TXF-DayTradeDash)— 台指期當沖戰情室
 
+![戰情室看板](pic/dashboard.png)
+*Live 戰情室看板(1m,2026-08-12 夜盤 · `7449902`)—— 計分板、σ 色帶 / U-L Cost / VWAP 主圖、CVD·COFI·COBI 與逐筆分級量*
+
 低延遲 tick 管線 + Dash 即時看板。以 **RingBuffer + Shared Memory + Numba** 做 O(1) 即時指標運算,
 UI 每 2 秒刷新。另有**四支 headless 批次工具**(HTML 快照 / 五檔 BidAsk / 跨月價差事件 / Quote 原始流),
 它們是 workspace 每日 sync 管線的一部分,見 [第 3 節](#3-批次匯出工具)。
@@ -11,6 +14,9 @@ UI 每 2 秒刷新。另有**四支 headless 批次工具**(HTML 快照 / 五檔
    └─（歷史）→ txf-data-lake ──Polars──→ Parquet ──────→ 兩者皆可讀
                                      (D:\txf-data)
 ```
+
+> 📌 **本專案可獨立部署**,不需要其他 repo。作者日常看盤已移往另一套 viewer,
+> 但本 repo 的**批次匯出工具仍在每日生產鏈上、持續維護**(見第 3 節)。
 
 **兩種資料來源**:`kafka`(即時或歷史回放)與 `parquet`(離線回放)。
 **沒有 Kafka 也能跑** —— 用 `--source parquet` 就只需要 Parquet 資料湖。
@@ -37,7 +43,7 @@ uv pip install -r requirements.txt
 |---|---|---|
 | `DATA_ROOT` | `config/settings.py` | Parquet 資料湖(預設 `D:/txf-data`) |
 | `SNAPSHOT_ROOT` | `config/settings.py` | HTML 快照輸出(預設 `D:/txf-snapshot`) |
-| Kafka broker | **CLI `--broker`** | 預設寫死 `192.168.1.50:9092`,**換機器要傳 `--broker <ip>:9092`** 或改預設值 |
+| Kafka broker | 環境變數 `GALE_KAFKA_BROKER` 或 CLI `--broker` | **預設 `localhost:9092`**。broker 在別台就設環境變數(一次設好,所有工具通用)或逐次帶 `--broker <ip>:9092`。⚠️ **別把位址寫回程式碼** —— 那會讓相依藏在預設值裡 |
 | 指標參數 / 配色 | `config/indicator_config.py` / `config/ui_theme.py` | 走 config,不要寫死在程式裡 |
 
 > ⚠️ **cwd 必須是 repo 根**(`.bat` 啟動器會硬檢查)。
@@ -52,6 +58,8 @@ uv pip install -r requirements.txt
 ```bash
 # Live 即時監控(連 Kafka)                          → Dashboard http://127.0.0.1:8050
 python -m bin.run_supervisor --broker <broker_ip>:9092
+#   broker 在本機就不必帶(預設 localhost:9092);固定在別台則:
+#   set GALE_KAFKA_BROKER=<ip>:9092    (Windows)   /   export …（bash）
 
 # Parquet 離線回放(不需要 Kafka,最安全)            → Dashboard http://127.0.0.1:8051
 python -m bin.run_supervisor --source parquet --date 2025-12-08 --speed 0
@@ -194,6 +202,10 @@ txf-gale-engine/
 ```
 
 ---
+
+## License
+
+[MIT](LICENSE)
 
 ## Disclaimer
 

@@ -58,6 +58,14 @@ echo.
 :: Uncomment the next line to set default args if you double-click directly.
 :: set "DEFAULT_ARGS=--mode history --date 2026-01-14 --session night"
 
+REM 2026-08-12: broker default is now localhost (correct default for a public repo).
+
+REM Set GALE_KAFKA_BROKER in your environment to point at a remote broker.
+
+if not defined GALE_KAFKA_BROKER set "GALE_KAFKA_BROKER=localhost:9092"
+
+
+
 if "%~1"=="" (
     echo No arguments provided. Running with defaults...
     :: Use DEFAULT_ARGS if set, otherwise just run raw (which defaults to Live Mode)

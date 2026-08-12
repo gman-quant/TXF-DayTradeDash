@@ -8,6 +8,7 @@ from gale.feed.kafka_client import GaleKafkaConsumer
 from gale.infra.memory import SharedRingBuffer
 from config.txf_calendar import get_current_session_offset
 from config.settings import SHM_CAPACITY
+from config.settings import KAFKA_BROKER
 
 # Try to use uvloop for better performance
 try:
@@ -359,7 +360,7 @@ class IngestServer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TXF Ingestion Server (Writer)")
-    parser.add_argument("--broker", type=str, default="192.168.1.50:9092")
+    parser.add_argument("--broker", type=str, default=KAFKA_BROKER)
     parser.add_argument("--group", type=str, default="gale_ingest_v1")
     parser.add_argument("--topic", type=str, default="txf-tick")
 

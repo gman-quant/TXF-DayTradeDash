@@ -6,7 +6,11 @@
 
 - 一律 `.\.venv\Scripts\python.exe`(Python 3.13;2026-07 工作站統一到 3.13)+ `PYTHONUTF8=1`(bin/*.py 沒自我 reconfigure)。cwd 必須是 repo 根(.bat 會硬檢查)。
 - 離線驗證用 parquet 回放(安全):`.venv/Scripts/python.exe -m bin.run_supervisor --source parquet --date 2025-12-08 --speed 0`(dashboard 在 **8051**;live 模式在 **8050**)。
-- Live 模式(`-m bin.run_supervisor` 不帶 --source)連 Kafka 192.168.1.50 —— **agent 別隨便啟動**(吃 live feed、開伺服器)。
+- Live 模式(`-m bin.run_supervisor` 不帶 --source)連 Kafka —— **agent 別隨便啟動**(吃 live feed、開伺服器)。
+- **Kafka broker 單一真相 = `config.settings.KAFKA_BROKER`**,預設 **`localhost:9092`**,以環境變數 `GALE_KAFKA_BROKER` 覆寫。
+  ⚠️ 2026-08-12 從一個寫死的私網位址改過來(**本 repo 要開 public**,那是壞的預設)。
+  🔒 **改預設值前先找出誰在靠它** —— 當時 `daily_sync.py` 的 ④bidask 與 ⑧md_raw **都不傳 `--broker`**,只靠那個預設;直接改會讓兩步安靜連 localhost 失敗,而它們的資料**補不回來**(五檔無歷史 API、md_raw 的 Kafka 只留 30 天)。同一次已把那兩步 + 兩支 `.bat` 改成顯式指定。
+  **通則:別讓相依藏在「預設值剛好對」裡。**
 - **沒有測試套件**(tests/ 刻意刪除);驗證 = py_compile + 已知日期的 --speed 0 回放。
 - 四支生產鏈工具(全部由 workspace 根的 `daily_sync.py` 每工作日 13:50 呼叫,
   **一律 `-m 模組` 形式**;細節見本 repo README 第 3 節):

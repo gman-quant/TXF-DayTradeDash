@@ -18,7 +18,7 @@ from config.settings import DATA_ROOT
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 logger = logging.getLogger("ExportBidAsk")
 
-async def export_bidask(date_str, session, broker="192.168.1.50:9092", topic="txf-bidask"):
+async def export_bidask(date_str, session, broker="localhost:9092", topic="txf-bidask"):
     """
     從 Kafka 匯出指定日期的原始五檔數據，存為 Parquet 檔案。
     """
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Export Raw BidAsk Data to Parquet")
     parser.add_argument("--date", type=str, required=True, help="Date in YYYY-MM-DD format")
     parser.add_argument("--session", type=str, choices=["day", "night", "both"], default="both", help="Session to export (default: both = full trading day)")
-    parser.add_argument("--broker", type=str, default="192.168.1.50:9092", help="Kafka Broker")
+    parser.add_argument("--broker", type=str, default="localhost:9092", help="Kafka Broker")
     parser.add_argument("--topic", type=str, default="txf-bidask", help="Kafka Topic")
     
     args = parser.parse_args()

@@ -1,5 +1,20 @@
 # config/settings.py
 
+import os
+
+# Kafka broker(單一真相)。**預設 localhost** —— 這是給 clone 下來的人的正確預設,
+# 而不是某台特定機器的位址。自己的環境用環境變數 `GALE_KAFKA_BROKER` 覆寫,
+# 或在每個指令上帶 `--broker <ip>:9092`。
+#
+# 2026-08-12 從一個寫死的私網位址改過來(本 repo 要開 public)。
+# 改預設值本身是**會弄壞生產鏈的**動作:workspace 的 `daily_sync.py` 第 4 步
+# (`batch_export_bidask`)與第 8 步(`export_md_raw`)**原本都不傳 `--broker`**,
+# 靠的就是那個寫死的預設 —— 而那兩步的資料**補不回來**(五檔無歷史 API、
+# md_raw 的 Kafka 只留 30 天)。所以同一次改動裡把那兩步改成**顯式傳入**,
+# `TXF_Live_Monitor.bat` 也改成先設環境變數。
+# 教訓:能被「預設值剛好對」掩蓋的相依,遲早會在改預設值那天靜靜爆掉。
+KAFKA_BROKER = os.environ.get("GALE_KAFKA_BROKER", "localhost:9092")
+
 # 設定資料根目錄
 DATA_ROOT = "D:/txf-data"
 
