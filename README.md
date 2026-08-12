@@ -1,7 +1,8 @@
 # txf-gale-engine(repo: TXF-DayTradeDash)— 台指期當沖戰情室
 
 低延遲 tick 管線 + Dash 即時看板。以 **RingBuffer + Shared Memory + Numba** 做 O(1) 即時指標運算,
-UI 每 2 秒刷新。另有 headless 批次工具產出 HTML 快照與 BidAsk Parquet。
+UI 每 2 秒刷新。另有**四支 headless 批次工具**(HTML 快照 / 五檔 BidAsk / 跨月價差事件 / Quote 原始流),
+它們是 workspace 每日 sync 管線的一部分,見 [第 3 節](#3-批次匯出工具)。
 
 ```
 永豐 Shioaji API
@@ -83,7 +84,16 @@ python -m bin.run_supervisor --mode history --date 2026-01-16 --session day
 
 ## 3. 批次匯出工具
 
-> 📌 **這兩個工具在生產鏈上** —— 是 workspace 每日 sync 管線的一部分,不是選配的玩具。
+> 📌 **這一節有四支工具,全部在生產鏈上** —— 是 workspace 每日 sync 九步裡的
+> ④⑤⑦⑧,不是選配的玩具。四支都由 workspace 根的 `daily_sync.py` 每個工作日 13:50 呼叫
+> (完整部署圖見 [workspace 根的 README](../README.md))。
+>
+> | sync 步驟 | 工具 | 產出 | 漏跑的代價 |
+> |---|---|---|---|
+> | ④ `bidask` | `tools/batch_export_bidask.py` | `raw_ticks/TXF/` | **永久損失**(Shioaji 無五檔歷史 API) |
+> | ⑤ `html` | `tools/batch_export_html.py` | `SNAPSHOT_ROOT` | 可重生 |
+> | ⑦ `spread` | `tools/build_spread_events.py` | `txf-data-lake` 的 `spread/` | 可重生(滾動 7 天自癒) |
+> | ⑧ `md_raw` | `tools/export_md_raw.py` | `txf-data-lake` 的 `md_raw/` | **Kafka 只留 30 天**,忘一個月就沒了 |
 
 ### HTML 快照(`tools/batch_export_html.py`)
 
@@ -109,6 +119,33 @@ python tools/batch_export_bidask.py --start-date 2025-12-01 --end-date 2026-05-1
 
 從 Kafka 解 Protobuf 還原五檔陣列,依年月存到 `D:\txf-data\raw_ticks\TXF\`。
 **需要 Kafka**(五檔只存在 Kafka,Shioaji 沒有歷史 API)。
+
+### 跨月價差事件層(`tools/build_spread_events.py`)
+
+```bash
+python -m tools.build_spread_events --from 2026-08-05 --to 2026-08-12 --overwrite
+```
+
+讀 `kbars/5s` 的近月/次月兩腿 asof 對齊,**只存 R2 有成交的時刻**,寫進資料湖的
+`spread/`。它是 **quant-platform viewer 那條價差線的預算檔** —— 產生器在本 repo、
+消費者在 platform。sync 每天跑**滾動 7 天 + `--overwrite`**,所以漏跑幾天會自癒。
+
+> ⚠️ 2026-07-28 事故:V46 上線時漏接排程 ⇒ 檔案凍在最後一次手動產出,
+> viewer 的前夜盤 + 全日價差整段變平線。**這支沒跑,畫面不會報錯,只會靜靜地錯。**
+
+### Quote 原始流落地(`tools/export_md_raw.py`)
+
+```bash
+python -m tools.export_md_raw --date 2026-08-12
+```
+
+`txf-md-raw` topic 的 Kafka JSON → 資料湖的 `md_raw/`。V-FLIP 之後 **Quote 是唯一水源**,
+而這裡是它唯一的檔案庫:`first_derived_*`(組合簿唯一入口)、R2 簿況、試撮、微秒時戳
+**三條 protobuf 流的匯出都沒有**,Shioaji 也沒有歷史 API。
+
+> 🔴 **Kafka 只保留 30 天** —— 忘記跑一個月就是永久損失。
+> 無資料時 exporter 自己 `exit 1` 是**刻意**的(不把「沒資料」當正常);
+> catchup 補 30 天前的舊日期會落在這條,屬預期。
 
 ---
 
@@ -149,7 +186,8 @@ txf-gale-engine/
 ├── bin/            執行入口(run_supervisor / run_dashboard)
 ├── gale/           核心套件(infra / feed / alpha / strategy / dashboard)
 ├── config/         settings.py / indicator_config.py / ui_theme.py / txf_calendar.py
-├── tools/          batch_export_html.py / batch_export_bidask.py
+├── tools/          四支生產鏈工具(見第 3 節):batch_export_html / batch_export_bidask
+│                / build_spread_events / export_md_raw
 ├── data_schemas/   Protobuf 定義(與 txf-streaming-server 共用契約)
 ├── Notes/          交易 playbook(order-flow 指標讀法)
 └── TXF_Live_Monitor.bat / TXF_History_Replay.bat   （cwd 必須是專案根）
