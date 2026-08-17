@@ -15,8 +15,13 @@ import os
 # 教訓:能被「預設值剛好對」掩蓋的相依,遲早會在改預設值那天靜靜爆掉。
 KAFKA_BROKER = os.environ.get("GALE_KAFKA_BROKER", "localhost:9092")
 
-# 設定資料根目錄
-DATA_ROOT = "D:/txf-data"
+# 設定資料根目錄 —— 2026-08-17 改由 `config/lake_paths.py`(vendored 正典)提供。
+# 🔑 本 repo 要開 public:陌生人 clone 下來會拿到出廠預設 `D:/txf-data`,那個路徑在
+#    他機器上不存在 ⇒ `require_roots()` 會**大聲失敗並說明要設哪個環境變數**,
+#    而不是靜靜跑出一張空圖。這正是上面 KAFKA_BROKER 那條教訓
+#    (「能被『預設值剛好對』掩蓋的相依,遲早會靜靜爆掉」)的同一個修法 ——
+#    當初只套用到 broker,隔四行的 DATA_ROOT 漏掉了。
+from config.lake_paths import ARCHIVE_ROOT, CACHE_ROOT, DATA_ROOT  # noqa: F401
 
 # 批次匯出 HTML 快照的存放根目錄(可被 batch_export --out-dir 覆寫)。
 # 快照是「可重生的衍生快取」(source 為 DATA_ROOT 的 parquet),故獨立於 repo、放 D 槽。
