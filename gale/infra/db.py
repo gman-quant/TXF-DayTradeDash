@@ -9,6 +9,7 @@ import math
 import os
 from datetime import datetime
 from gale.utils.log_utils import setup_logger
+from config.lake_paths import kbar_dir, kbar_paths
 from config.settings import DATA_ROOT
 
 logger = setup_logger("InfraDB")
@@ -76,10 +77,11 @@ def _daily_settlement_from_1m(date_str, symbol):
 
     取不到(檔案缺/無成交)回 None,由呼叫端 fallback 回 1d close。"""
     try:
-        path = os.path.join(DATA_ROOT, "kbars", "1m", symbol,
-                            date_str[:4], f"{date_str}_{symbol}_1m.parquet")
-        if not os.path.exists(path):
+        # 2026-08-18:kbar 的位置由 lake_paths 決定(cache 可能在別的磁碟)。
+        _paths = kbar_paths("1m", symbol, date_str, date_str)
+        if not _paths:
             return None
+        path = _paths[0]
         con = duckdb.connect()
         try:
             row = con.execute(f"""
@@ -109,8 +111,8 @@ def load_prev_close(target_date_str, op="<", symbol="TXF"):
         years_to_check = [target_dt.year, target_dt.year - 1]
 
         for year in years_to_check:
-            # [Fix] Use centralized DATA_ROOT from config
-            BASE_PATH = os.path.join(DATA_ROOT, "kbars", "1d", symbol)
+            # 2026-08-18:改走 lake_paths(kbar 屬 cache,可能不在 DATA_ROOT 底下)
+            BASE_PATH = kbar_dir("1d", symbol)
             
             if not os.path.exists(BASE_PATH):
                 logger.warning(
